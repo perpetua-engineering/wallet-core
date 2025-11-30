@@ -6,7 +6,6 @@ if (NOT FLUTTER)
 endif ()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment version" FORCE)
 
 #
 # IDE Settings
@@ -84,5 +83,3 @@ if (TW_BUILD_EXAMPLES)
 else()
     message(STATUS "Native examples skipped")
 endif()
-
-
