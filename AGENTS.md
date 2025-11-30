@@ -13,6 +13,7 @@
 - Lint touched C++ files: `tools/lint` (clang-tidy; expects `build/compile_commands.json`).
 - Platform targets: `tools/android-build`, `tools/ios-build`, `tools/kotlin-build`, `tools/wasm-build`; pass platform SDK env vars as needed.
 - Coverage update: run lcov, then `tools/check-coverage coverage.stats coverage.info` before raising the threshold.
+- Apple XCFramework flow (iOS/watchOS/macOS): `tools/build-apple.sh` generates code (Rust/cbindgen + protos), builds per-SDK slices (ios device/sim, watch device/sim, macOS arm64/x86_64), and packages `build/WalletCore.xcframework`. Use `tools/xcframework-only.sh` to repackage without rebuilding slices. Tunables: `IOS_MIN`, `WATCH_MIN`, `MAC_MIN`, `JOBS`, `SKIP_CODEGEN`, `SKIP_XCODEGEN`.
 
 ## Coding Style & Naming Conventions
 - Use clang and C++20; follow existing patterns: 4-space indentation, brace on the same line for definitions, PascalCase types, camelCase methods/functions, and snake_case locals where present.
@@ -34,3 +35,4 @@
 - Never commit secrets or private keys; use test vectors under `tests/chains/.../data/` instead.
 - If touching cryptography or transaction serialization, note audit impact (`audit/`) and add explicit test vectors.
 - Use `SECURITY.MD` for vulnerability reporting guidance; disclose sensitive issues privately.
+- Apple build specifics: module map now exports the C API (umbrella `TrustWalletCore`) with a C++ `Rust` submodule; macOS slice is fat-lipo’d as `libWalletCore-macos-universal.a` to satisfy XCFramework naming. Swift overlay requires importing upstream Swift sources (`swift/Sources`) plus a shim target re-exporting `SwiftProtobuf` as `WalletCoreSwiftProtobuf`.
