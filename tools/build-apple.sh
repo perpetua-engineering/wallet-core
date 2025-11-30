@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+#
+# Build TrustWalletCore for Apple platforms (iOS + watchOS) and assemble an XCFramework.
+# Generates Rust bindings, builds per-SDK slices from clean build dirs, then creates build/WalletCore.xcframework.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_ROOT="${ROOT}/build/apple"
+XCFRAMEWORK_PATH="${ROOT}/build/WalletCore.xcframework"
+HEADER_STAGE="${BUILD_ROOT}/headers"
+JOBS="${JOBS:-$(sysctl -n hw.ncpu)}"
+IOS_MIN="${IOS_MIN:-17.0}"
+WATCH_MIN="${WATCH_MIN:-10.0}"
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing required tool: $1" >&2; exit 1; }
+}
+
+require_cmd cmake
+require_cmd xcodebuild
+require_cmd xcrun
+
+echo "==> Generating bindings (protos + WalletCoreRSBindgen.h)"
+if [[ "${SKIP_CODEGEN:-0}" != "1" ]]; then
+  # Avoid running xcodegen/pod if not needed (set SKIP_XCODEGEN=0 to force).
+  export SKIP_XCODEGEN="${SKIP_XCODEGEN:-1}"
+  "${ROOT}/tools/generate-files" ios
+else
+  echo "Skipping codegen because SKIP_CODEGEN=1"
+fi
+
+ensure_rust_lib() {
+  local target="$1"
+  local out="${ROOT}/rust/target/${target}/release/libwallet_core_rs.a"
+
+  if ! rustc --print target-list | grep -q "$target"; then
+    echo "Rust target ${target} not installed. Add it via: rustup target add ${target}" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$out" ]]; then
+    echo "==> Building Rust target ${target}"
+    pushd "${ROOT}/rust" >/dev/null
+    RUSTFLAGS="-Zlocation-detail=none" cargo build -Z build-std=std,panic_abort --target "$target" --release --lib
+    popd >/dev/null
+  fi
+
+  echo "$out"
+}
+
+build_slice() {
+  local sdk="$1"       # iphoneos, iphonesimulator, watchos, watchsimulator
+  local min_os="$2"    # e.g. 17.0
+  local arch="$3"      # e.g. arm64
+  local rust_target="$4"
+  local out_var="$5"   # name of variable to fill with lib path
+
+  local build_dir="${BUILD_ROOT}/${sdk}-${arch}"
+  local sdk_path
+  sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
+
+  echo "==> Configuring ${sdk} ${arch} (min ${min_os})"
+  rm -rf "$build_dir"
+  cmake -S "$ROOT" -B "$build_dir" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_OSX_SYSROOT="$sdk_path" \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$min_os" \
+    -DCMAKE_OSX_ARCHITECTURES="$arch" \
+    -DWALLET_CORE_RS_TARGET_DIR="${ROOT}/rust/target/${rust_target}"
+
+  echo "==> Building TrustWalletCore for ${sdk} ${arch}"
+  cmake --build "$build_dir" --config Release --target TrustWalletCore -- -j"$JOBS"
+
+  local out_path="${build_dir}/libTrustWalletCore.a"
+  printf -v "$out_var" "%s" "$out_path"
+}
+
+mkdir -p "$BUILD_ROOT"
+
+# Ensure Rust libs exist for the corresponding slices.
+ensure_rust_lib aarch64-apple-ios
+ensure_rust_lib aarch64-apple-ios-sim
+ensure_rust_lib x86_64-apple-ios
+ensure_rust_lib aarch64-apple-watchos
+ensure_rust_lib arm64_32-apple-watchos
+ensure_rust_lib aarch64-apple-watchos-sim
+ensure_rust_lib x86_64-apple-watchos-sim
+
+build_slice watchos "$WATCH_MIN" arm64_32 arm64_32-apple-watchos WATCH_DEV_ARM6432_LIB
+build_slice iphoneos "$IOS_MIN" arm64 aarch64-apple-ios IOS_DEV_LIB
+
+build_slice iphonesimulator "$IOS_MIN" arm64 aarch64-apple-ios-sim IOS_SIM_ARM64_LIB
+build_slice iphonesimulator "$IOS_MIN" x86_64 x86_64-apple-ios IOS_SIM_X64_LIB
+build_slice watchos "$WATCH_MIN" arm64 aarch64-apple-watchos WATCH_DEV_LIB
+build_slice watchsimulator "$WATCH_MIN" arm64 aarch64-apple-watchos-sim WATCH_SIM_ARM64_LIB
+build_slice watchsimulator "$WATCH_MIN" x86_64 x86_64-apple-watchos-sim WATCH_SIM_X64_LIB
+
+IOS_SIM_UNIV="${BUILD_ROOT}/iphonesimulator-universal.a"
+WATCH_SIM_UNIV="${BUILD_ROOT}/watchsimulator-universal.a"
+
+echo "==> Creating fat simulator libs"
+lipo -create "$IOS_SIM_ARM64_LIB" "$IOS_SIM_X64_LIB" -output "$IOS_SIM_UNIV"
+lipo -create "$WATCH_SIM_ARM64_LIB" "$WATCH_SIM_X64_LIB" -output "$WATCH_SIM_UNIV"
+
+echo "==> Staging headers"
+rm -rf "$HEADER_STAGE"
+mkdir -p "$HEADER_STAGE"
+cp -R "${ROOT}/include/." "$HEADER_STAGE/"
+cp "${ROOT}/src/rust/bindgen/WalletCoreRSBindgen.h" "$HEADER_STAGE/"
+cat > "${HEADER_STAGE}/module.modulemap" <<'EOF'
+module WalletCore {
+  requires cplusplus
+  umbrella "TrustWalletCore"
+  header "WalletCoreRSBindgen.h"
+  export *
+  module * { export * }
+}
+EOF
+
+echo "==> Creating XCFramework at ${XCFRAMEWORK_PATH}"
+rm -rf "$XCFRAMEWORK_PATH"
+xcodebuild -create-xcframework \
+  -library "$IOS_DEV_LIB" -headers "$HEADER_STAGE" \
+  -library "$IOS_SIM_UNIV" -headers "$HEADER_STAGE" \
+  -library "$WATCH_DEV_LIB" -headers "$HEADER_STAGE" \
+  -library "$WATCH_DEV_ARM6432_LIB" -headers "$HEADER_STAGE" \
+  -library "$WATCH_SIM_UNIV" -headers "$HEADER_STAGE" \
+  -output "$XCFRAMEWORK_PATH"
+
+echo "✅ Done. XCFramework available at ${XCFRAMEWORK_PATH}"
