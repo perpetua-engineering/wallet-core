@@ -12,6 +12,7 @@ HEADER_STAGE="${BUILD_ROOT}/headers"
 JOBS="${JOBS:-$(sysctl -n hw.ncpu)}"
 IOS_MIN="${IOS_MIN:-17.0}"
 WATCH_MIN="${WATCH_MIN:-10.0}"
+MAC_MIN="${MAC_MIN:-14.0}"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required tool: $1" >&2; exit 1; }
@@ -82,26 +83,30 @@ mkdir -p "$BUILD_ROOT"
 ensure_rust_lib aarch64-apple-ios
 ensure_rust_lib aarch64-apple-ios-sim
 ensure_rust_lib x86_64-apple-ios
-ensure_rust_lib aarch64-apple-watchos
 ensure_rust_lib arm64_32-apple-watchos
 ensure_rust_lib aarch64-apple-watchos-sim
 ensure_rust_lib x86_64-apple-watchos-sim
+ensure_rust_lib aarch64-apple-darwin
+ensure_rust_lib x86_64-apple-darwin
 
 build_slice watchos "$WATCH_MIN" arm64_32 arm64_32-apple-watchos WATCH_DEV_ARM6432_LIB
 build_slice iphoneos "$IOS_MIN" arm64 aarch64-apple-ios IOS_DEV_LIB
-
 build_slice iphonesimulator "$IOS_MIN" arm64 aarch64-apple-ios-sim IOS_SIM_ARM64_LIB
 build_slice iphonesimulator "$IOS_MIN" x86_64 x86_64-apple-ios IOS_SIM_X64_LIB
-build_slice watchos "$WATCH_MIN" arm64 aarch64-apple-watchos WATCH_DEV_LIB
 build_slice watchsimulator "$WATCH_MIN" arm64 aarch64-apple-watchos-sim WATCH_SIM_ARM64_LIB
-build_slice watchsimulator "$WATCH_MIN" x86_64 x86_64-apple-watchos-sim WATCH_SIM_X64_LIB
+build_slice watchsimulator "$WATCH_MIN" x86_64 aarch64-apple-watchos-sim WATCH_SIM_X64_LIB
+build_slice macosx "$MAC_MIN" arm64 aarch64-apple-darwin MAC_ARM64_LIB
+build_slice macosx "$MAC_MIN" x86_64 x86_64-apple-darwin MAC_X64_LIB
 
-IOS_SIM_UNIV="${BUILD_ROOT}/iphonesimulator-universal.a"
-WATCH_SIM_UNIV="${BUILD_ROOT}/watchsimulator-universal.a"
+IOS_SIM_UNIV="${BUILD_ROOT}/libWalletCore-ios-sim-universal.a"
+WATCH_SIM_UNIV="${BUILD_ROOT}/libWalletCore-watch-sim-universal.a"
+# Xcode prefers static libs prefixed with lib*.a inside XCFrameworks.
+MAC_UNIV="${BUILD_ROOT}/libWalletCore-macos-universal.a"
 
 echo "==> Creating fat simulator libs"
 lipo -create "$IOS_SIM_ARM64_LIB" "$IOS_SIM_X64_LIB" -output "$IOS_SIM_UNIV"
 lipo -create "$WATCH_SIM_ARM64_LIB" "$WATCH_SIM_X64_LIB" -output "$WATCH_SIM_UNIV"
+lipo -create "$MAC_ARM64_LIB" "$MAC_X64_LIB" -output "$MAC_UNIV"
 
 echo "==> Staging headers"
 rm -rf "$HEADER_STAGE"
@@ -110,11 +115,14 @@ cp -R "${ROOT}/include/." "$HEADER_STAGE/"
 cp "${ROOT}/src/rust/bindgen/WalletCoreRSBindgen.h" "$HEADER_STAGE/"
 cat > "${HEADER_STAGE}/module.modulemap" <<'EOF'
 module WalletCore {
-  requires cplusplus
   umbrella "TrustWalletCore"
-  header "WalletCoreRSBindgen.h"
   export *
   module * { export * }
+  explicit module Rust {
+    requires cplusplus
+    header "WalletCoreRSBindgen.h"
+    export *
+  }
 }
 EOF
 
@@ -123,9 +131,9 @@ rm -rf "$XCFRAMEWORK_PATH"
 xcodebuild -create-xcframework \
   -library "$IOS_DEV_LIB" -headers "$HEADER_STAGE" \
   -library "$IOS_SIM_UNIV" -headers "$HEADER_STAGE" \
-  -library "$WATCH_DEV_LIB" -headers "$HEADER_STAGE" \
   -library "$WATCH_DEV_ARM6432_LIB" -headers "$HEADER_STAGE" \
   -library "$WATCH_SIM_UNIV" -headers "$HEADER_STAGE" \
+  -library "$MAC_UNIV" -headers "$HEADER_STAGE" \
   -output "$XCFRAMEWORK_PATH"
 
 echo "✅ Done. XCFramework available at ${XCFRAMEWORK_PATH}"
