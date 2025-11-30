@@ -2,6 +2,11 @@
 #
 # This script generates the Xcode project using xcodegen.
 
+if [[ "${SKIP_XCODEGEN:-0}" == "1" ]]; then
+    echo "Skipping xcodegen (SKIP_XCODEGEN=1)"
+    exit 0
+fi
+
 pushd swift
 
 xcodegen
