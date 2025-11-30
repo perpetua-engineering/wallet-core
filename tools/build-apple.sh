@@ -80,9 +80,15 @@ build_slice() {
 mkdir -p "$BUILD_ROOT"
 
 # Ensure Rust libs exist for the corresponding slices.
+# To add a new slice:
+# 1) Add ensure_rust_lib <target>.
+# 2) Add build_slice <sdk> <min> <arch> <rust_target> <out_var>.
+# 3) Add dependency paths (trezor/protobuf/rust) and combined lib path.
+# 4) Add combine_libs entry and include in xcodebuild -create-xcframework.
 ensure_rust_lib aarch64-apple-ios
 ensure_rust_lib aarch64-apple-ios-sim
 ensure_rust_lib x86_64-apple-ios
+ensure_rust_lib aarch64-apple-watchos
 ensure_rust_lib arm64_32-apple-watchos
 ensure_rust_lib aarch64-apple-watchos-sim
 ensure_rust_lib x86_64-apple-watchos-sim
@@ -91,6 +97,7 @@ ensure_rust_lib x86_64-apple-darwin
 
 build_slice watchos "$WATCH_MIN" arm64_32 arm64_32-apple-watchos WATCH_DEV_ARM6432_LIB
 build_slice iphoneos "$IOS_MIN" arm64 aarch64-apple-ios IOS_DEV_LIB
+build_slice watchos "$WATCH_MIN" arm64 aarch64-apple-watchos WATCH_DEV_ARM64_LIB
 build_slice iphonesimulator "$IOS_MIN" arm64 aarch64-apple-ios-sim IOS_SIM_ARM64_LIB
 build_slice iphonesimulator "$IOS_MIN" x86_64 x86_64-apple-ios IOS_SIM_X64_LIB
 build_slice watchsimulator "$WATCH_MIN" arm64 aarch64-apple-watchos-sim WATCH_SIM_ARM64_LIB
@@ -112,12 +119,14 @@ combine_libs() {
 TREZOR_IOS_DEV="${BUILD_ROOT}/iphoneos-arm64/trezor-crypto/libTrezorCrypto.a"
 TREZOR_IOS_SIM_ARM64="${BUILD_ROOT}/iphonesimulator-arm64/trezor-crypto/libTrezorCrypto.a"
 TREZOR_IOS_SIM_X64="${BUILD_ROOT}/iphonesimulator-x86_64/trezor-crypto/libTrezorCrypto.a"
+TREZOR_WATCH_DEV_ARM64="${BUILD_ROOT}/watchos-arm64/trezor-crypto/libTrezorCrypto.a"
 TREZOR_WATCH_DEV_ARM6432="${BUILD_ROOT}/watchos-arm64_32/trezor-crypto/libTrezorCrypto.a"
 TREZOR_WATCH_SIM_ARM64="${BUILD_ROOT}/watchsimulator-arm64/trezor-crypto/libTrezorCrypto.a"
 TREZOR_WATCH_SIM_X64="${BUILD_ROOT}/watchsimulator-x86_64/trezor-crypto/libTrezorCrypto.a"
 TREZOR_MAC_ARM64="${BUILD_ROOT}/macosx-arm64/trezor-crypto/libTrezorCrypto.a"
 TREZOR_MAC_X64="${BUILD_ROOT}/macosx-x86_64/trezor-crypto/libTrezorCrypto.a"
 
+PROTOBUF_WATCH_DEV_ARM64="${BUILD_ROOT}/watchos-arm64/libprotobuf.a"
 PROTOBUF_IOS_DEV="${BUILD_ROOT}/iphoneos-arm64/libprotobuf.a"
 PROTOBUF_IOS_SIM_ARM64="${BUILD_ROOT}/iphonesimulator-arm64/libprotobuf.a"
 PROTOBUF_IOS_SIM_X64="${BUILD_ROOT}/iphonesimulator-x86_64/libprotobuf.a"
@@ -127,6 +136,7 @@ PROTOBUF_WATCH_SIM_X64="${BUILD_ROOT}/watchsimulator-x86_64/libprotobuf.a"
 PROTOBUF_MAC_ARM64="${BUILD_ROOT}/macosx-arm64/libprotobuf.a"
 PROTOBUF_MAC_X64="${BUILD_ROOT}/macosx-x86_64/libprotobuf.a"
 
+RUST_WATCH_DEV_ARM64="${ROOT}/rust/target/aarch64-apple-watchos/release/libwallet_core_rs.a"
 RUST_IOS_DEV="${ROOT}/rust/target/aarch64-apple-ios/release/libwallet_core_rs.a"
 RUST_IOS_SIM_ARM64="${ROOT}/rust/target/aarch64-apple-ios-sim/release/libwallet_core_rs.a"
 RUST_IOS_SIM_X64="${ROOT}/rust/target/x86_64-apple-ios/release/libwallet_core_rs.a"
@@ -139,6 +149,7 @@ RUST_MAC_X64="${ROOT}/rust/target/x86_64-apple-darwin/release/libwallet_core_rs.
 IOS_DEV_COMBINED="${BUILD_ROOT}/iphoneos-arm64/libWalletCore-combined.a"
 IOS_SIM_ARM64_COMBINED="${BUILD_ROOT}/iphonesimulator-arm64/libWalletCore-combined.a"
 IOS_SIM_X64_COMBINED="${BUILD_ROOT}/iphonesimulator-x86_64/libWalletCore-combined.a"
+WATCH_DEV_ARM64_COMBINED="${BUILD_ROOT}/watchos-arm64/libWalletCore-combined.a"
 WATCH_DEV_ARM6432_COMBINED="${BUILD_ROOT}/watchos-arm64_32/libWalletCore-combined.a"
 WATCH_SIM_ARM64_COMBINED="${BUILD_ROOT}/watchsimulator-arm64/libWalletCore-combined.a"
 WATCH_SIM_X64_COMBINED="${BUILD_ROOT}/watchsimulator-x86_64/libWalletCore-combined.a"
@@ -149,6 +160,7 @@ echo "==> Creating fat simulator libs"
 combine_libs "$IOS_DEV_COMBINED" "$IOS_DEV_LIB" "$TREZOR_IOS_DEV" "$RUST_IOS_DEV"
 combine_libs "$IOS_SIM_ARM64_COMBINED" "$IOS_SIM_ARM64_LIB" "$TREZOR_IOS_SIM_ARM64" "$RUST_IOS_SIM_ARM64" "$PROTOBUF_IOS_SIM_ARM64"
 combine_libs "$IOS_SIM_X64_COMBINED" "$IOS_SIM_X64_LIB" "$TREZOR_IOS_SIM_X64" "$RUST_IOS_SIM_X64" "$PROTOBUF_IOS_SIM_X64"
+combine_libs "$WATCH_DEV_ARM64_COMBINED" "$WATCH_DEV_ARM64_LIB" "$TREZOR_WATCH_DEV_ARM64" "$RUST_WATCH_DEV_ARM64" "$PROTOBUF_WATCH_DEV_ARM64"
 combine_libs "$WATCH_DEV_ARM6432_COMBINED" "$WATCH_DEV_ARM6432_LIB" "$TREZOR_WATCH_DEV_ARM6432" "$RUST_WATCH_DEV_ARM6432" "$PROTOBUF_WATCH_DEV_ARM6432"
 combine_libs "$WATCH_SIM_ARM64_COMBINED" "$WATCH_SIM_ARM64_LIB" "$TREZOR_WATCH_SIM_ARM64" "$RUST_WATCH_SIM_ARM64" "$PROTOBUF_WATCH_SIM_ARM64"
 combine_libs "$WATCH_SIM_X64_COMBINED" "$WATCH_SIM_X64_LIB" "$TREZOR_WATCH_SIM_X64" "$RUST_WATCH_SIM_X64" "$PROTOBUF_WATCH_SIM_X64"
@@ -182,6 +194,7 @@ rm -rf "$XCFRAMEWORK_PATH"
 xcodebuild -create-xcframework \
   -library "$IOS_DEV_COMBINED" -headers "$HEADER_STAGE" \
   -library "$IOS_SIM_UNIV" -headers "$HEADER_STAGE" \
+  -library "$WATCH_DEV_ARM64_COMBINED" -headers "$HEADER_STAGE" \
   -library "$WATCH_DEV_ARM6432_COMBINED" -headers "$HEADER_STAGE" \
   -library "$WATCH_SIM_UNIV" -headers "$HEADER_STAGE" \
   -library "$MAC_UNIV" -headers "$HEADER_STAGE" \
