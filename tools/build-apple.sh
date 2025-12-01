@@ -107,6 +107,7 @@ build_slice macosx "$MAC_MIN" x86_64 x86_64-apple-darwin MAC_X64_LIB
 
 IOS_SIM_UNIV="${BUILD_ROOT}/libWalletCore-ios-sim-universal.a"
 WATCH_SIM_UNIV="${BUILD_ROOT}/libWalletCore-watch-sim-universal.a"
+WATCH_DEV_UNIV="${BUILD_ROOT}/libWalletCore-watch-dev-universal.a"
 # Xcode prefers static libs prefixed with lib*.a inside XCFrameworks.
 MAC_UNIV="${BUILD_ROOT}/libWalletCore-macos-universal.a"
 
@@ -157,7 +158,7 @@ MAC_ARM64_COMBINED="${BUILD_ROOT}/macosx-arm64/libWalletCore-combined.a"
 MAC_X64_COMBINED="${BUILD_ROOT}/macosx-x86_64/libWalletCore-combined.a"
 
 echo "==> Creating fat simulator libs"
-combine_libs "$IOS_DEV_COMBINED" "$IOS_DEV_LIB" "$TREZOR_IOS_DEV" "$RUST_IOS_DEV"
+combine_libs "$IOS_DEV_COMBINED" "$IOS_DEV_LIB" "$TREZOR_IOS_DEV" "$RUST_IOS_DEV" "$PROTOBUF_IOS_DEV"
 combine_libs "$IOS_SIM_ARM64_COMBINED" "$IOS_SIM_ARM64_LIB" "$TREZOR_IOS_SIM_ARM64" "$RUST_IOS_SIM_ARM64" "$PROTOBUF_IOS_SIM_ARM64"
 combine_libs "$IOS_SIM_X64_COMBINED" "$IOS_SIM_X64_LIB" "$TREZOR_IOS_SIM_X64" "$RUST_IOS_SIM_X64" "$PROTOBUF_IOS_SIM_X64"
 combine_libs "$WATCH_DEV_ARM64_COMBINED" "$WATCH_DEV_ARM64_LIB" "$TREZOR_WATCH_DEV_ARM64" "$RUST_WATCH_DEV_ARM64" "$PROTOBUF_WATCH_DEV_ARM64"
@@ -169,6 +170,7 @@ combine_libs "$MAC_X64_COMBINED" "$MAC_X64_LIB" "$TREZOR_MAC_X64" "$RUST_MAC_X64
 
 lipo -create "$IOS_SIM_ARM64_COMBINED" "$IOS_SIM_X64_COMBINED" -output "$IOS_SIM_UNIV"
 lipo -create "$WATCH_SIM_ARM64_COMBINED" "$WATCH_SIM_X64_COMBINED" -output "$WATCH_SIM_UNIV"
+lipo -create "$WATCH_DEV_ARM64_COMBINED" "$WATCH_DEV_ARM6432_COMBINED" -output "$WATCH_DEV_UNIV"
 lipo -create "$MAC_ARM64_COMBINED" "$MAC_X64_COMBINED" -output "$MAC_UNIV"
 
 echo "==> Staging headers"
@@ -194,8 +196,7 @@ rm -rf "$XCFRAMEWORK_PATH"
 xcodebuild -create-xcframework \
   -library "$IOS_DEV_COMBINED" -headers "$HEADER_STAGE" \
   -library "$IOS_SIM_UNIV" -headers "$HEADER_STAGE" \
-  -library "$WATCH_DEV_ARM64_COMBINED" -headers "$HEADER_STAGE" \
-  -library "$WATCH_DEV_ARM6432_COMBINED" -headers "$HEADER_STAGE" \
+  -library "$WATCH_DEV_UNIV" -headers "$HEADER_STAGE" \
   -library "$WATCH_SIM_UNIV" -headers "$HEADER_STAGE" \
   -library "$MAC_UNIV" -headers "$HEADER_STAGE" \
   -output "$XCFRAMEWORK_PATH"
