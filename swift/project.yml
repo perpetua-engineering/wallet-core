@@ -38,6 +38,7 @@ targets:
       - target: protobuf
         link: true
       - sdk: libc++.tbd
+      - sdk: Security.framework
       - framework: WalletCoreRs.xcframework
     scheme:
       testTargets:

@@ -42,6 +42,7 @@ targets:
       - target: protobuf_${platform}
         link: true
       - sdk: libc++.tbd
+      - sdk: Security.framework
       - framework: WalletCoreRs.xcframework
     settings:
       SKIP_INSTALL: false

@@ -63,7 +63,8 @@ end.parse!
 entities = []
 files = []
 Dir.foreach(options.input) do |item|
-  next if ['.', '..', '.DS_Store'].include?(item)
+  # Skip platform-specific headers that use unsupported types (e.g., SecKeyRef via void*)
+  next if ['.', '..', '.DS_Store', 'TWSecureSigner.h'].include?(item)
 
   file_path = File.expand_path(File.join(options.input, item))
   entity = Parser.new(path: file_path).parse
