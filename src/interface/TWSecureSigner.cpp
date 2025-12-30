@@ -44,6 +44,8 @@ TWData* _Nonnull TWSecureSignerSignDigest(
 #include "proto/Bitcoin.pb.h"
 #include "proto/Solana.pb.h"
 
+// C headers need extern "C" to prevent C++ name mangling
+extern "C" {
 #include <TrezorCrypto/memzero.h>
 #include <TrezorCrypto/hmac.h>
 #include <TrezorCrypto/sha2.h>
@@ -51,6 +53,7 @@ TWData* _Nonnull TWSecureSignerSignDigest(
 #include <TrezorCrypto/chacha20poly1305/chacha20poly1305.h>
 #include <TrezorCrypto/ecdsa.h>
 #include <TrezorCrypto/nist256p1.h>
+}
 
 #include <Security/Security.h>
 #include <string>

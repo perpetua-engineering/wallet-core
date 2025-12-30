@@ -36,4 +36,40 @@
 - Never commit secrets or private keys; use test vectors under `tests/chains/.../data/` instead.
 - If touching cryptography or transaction serialization, note audit impact (`audit/`) and add explicit test vectors.
 - Use `SECURITY.MD` for vulnerability reporting guidance; disclose sensitive issues privately.
-- Apple build specifics: module map now exports the C API (umbrella `TrustWalletCore`) with a C++ `Rust` submodule; macOS slice is fat-lipo’d as `libWalletCore-macos-universal.a` to satisfy XCFramework naming. Swift overlay requires importing upstream Swift sources (`swift/Sources`) plus a shim target re-exporting `SwiftProtobuf` as `WalletCoreSwiftProtobuf`.
+- Apple build specifics: module map now exports the C API (umbrella `TrustWalletCore`) with a C++ `Rust` submodule; macOS slice is fat-lipo'd as `libWalletCore-macos-universal.a` to satisfy XCFramework naming. Swift overlay requires importing upstream Swift sources (`swift/Sources`) plus a shim target re-exporting `SwiftProtobuf` as `WalletCoreSwiftProtobuf`.
+
+## TWSecureSigner (Apple-only Secure Enclave Integration)
+
+### Overview
+`TWSecureSigner` provides signing APIs that accept encrypted mnemonic + SE key reference, performing decryption and signing entirely in C++ with deterministic memory zeroing via `memzero()`. This eliminates Swift memory copies of sensitive data.
+
+### Files
+- `include/TrustWalletCore/TWSecureSigner.h` — C API header (manually maintained, not auto-generated)
+- `src/interface/TWSecureSigner.cpp` — Implementation with `#if __APPLE__` guards
+- `swift/Sources/SecureSigner.swift` — Swift wrapper (manually maintained)
+- `codegen/lib/templates/swift/TrustWalletCore.h.erb` — Updated to include `TWSecureSigner.h` for Apple platforms
+
+### C/C++ Linkage
+TrezorCrypto headers are pure C. When including from C++ files, wrap in `extern "C"`:
+```cpp
+extern "C" {
+#include <TrezorCrypto/memzero.h>
+#include <TrezorCrypto/chacha20poly1305/rfc7539.h>
+#include <TrezorCrypto/chacha20poly1305/chacha20poly1305.h>
+// ... other C headers
+}
+```
+Without this, the linker will fail with "declaration possibly missing 'extern "C"'" errors.
+
+### Encryption Format (v1)
+The encrypted mnemonic blob format (created by Swift's `SEMnemonicEncryption`):
+```
+version(1) + ephemeralPubKey(65, X9.63) + nonce(12) + ciphertext + tag(16)
+```
+- Version `0x00`: unencrypted (SE unavailable at storage time)
+- Version `0x01`: SE-encrypted with ECDH + HKDF-SHA256 + ChaCha20-Poly1305
+
+### Build Notes
+- TWSecureSigner is compiled into all Apple platform slices (iOS, watchOS, macOS)
+- Non-Apple builds get stub implementations returning empty data
+- After modifying, rebuild with `JOBS=8 tools/build-apple.sh` and sync to WalletCoreSPM
