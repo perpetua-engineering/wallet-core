@@ -14,6 +14,7 @@
 - Platform targets: `tools/android-build`, `tools/ios-build`, `tools/kotlin-build`, `tools/wasm-build`; pass platform SDK env vars as needed.
 - Coverage update: run lcov, then `tools/check-coverage coverage.stats coverage.info` before raising the threshold.
 - Apple XCFramework flow (iOS/watchOS/macOS): `tools/build-apple.sh` generates code (Rust/cbindgen + protos), builds per-SDK slices (ios device/sim, watch device/sim, macOS arm64/x86_64), and packages `build/WalletCore.xcframework`. Use `tools/xcframework-only.sh` to repackage without rebuilding slices. Tunables: `IOS_MIN`, `WATCH_MIN`, `MAC_MIN`, `JOBS`, `SKIP_CODEGEN`, `SKIP_XCODEGEN`.
+- **Agent note**: `build-apple.sh` produces ~67K lines / 7MB of output (cmake config, compile progress, third-party warnings). Pipe to a file to avoid context overflow: `JOBS=8 tools/build-apple.sh > /tmp/wallet-core-build.log 2>&1`. Check exit code and grep the log afterward.
 
 ## Coding Style & Naming Conventions
 - Use clang and C++20; follow existing patterns: 4-space indentation, brace on the same line for definitions, PascalCase types, camelCase methods/functions, and snake_case locals where present.
