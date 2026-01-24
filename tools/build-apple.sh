@@ -43,7 +43,7 @@ ensure_rust_lib() {
   if [[ ! -f "$out" ]]; then
     echo "==> Building Rust target ${target}"
     pushd "${ROOT}/rust" >/dev/null
-    RUSTFLAGS="-Zlocation-detail=none" cargo build -Z build-std=std,panic_abort --target "$target" --release --lib
+    RUSTFLAGS="-Zlocation-detail=none" cargo +nightly build -Z build-std=std,panic_abort --target "$target" --release --lib
     popd >/dev/null
   fi
 
