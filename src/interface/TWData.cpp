@@ -96,6 +96,9 @@ void TWDataReset(TWData *_Nonnull data) {
 }
 
 void TWDataDelete(TWData *_Nonnull data) {
+    if (data == nullptr) {
+        return;
+    }
     auto* v = const_cast<Data*>(reinterpret_cast<const Data*>(data));
     // Security: Zero sensitive data before freeing (matches TWStringDelete behavior)
     memzero(v->data(), v->size());
