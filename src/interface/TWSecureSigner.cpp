@@ -23,6 +23,10 @@ TWData* _Nonnull TWSecureSignerSignSolana(
     TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, TWString* _Nonnull) {
     return TWDataCreateWithSize(0);
 }
+TWData* _Nonnull TWSecureSignerSignUtxo(
+    TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, enum TWCoinType, TWString* _Nonnull) {
+    return TWDataCreateWithSize(0);
+}
 TWData* _Nonnull TWSecureSignerSignTron(
     TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, TWString* _Nonnull) {
     return TWDataCreateWithSize(0);
@@ -404,6 +408,55 @@ TWData* _Nonnull TWSecureSignerSignSolana(
 
     Data outputData;
     TW::anyCoinSign(TWCoinTypeSolana, inputData, outputData);
+
+    // Clear private key from protobuf
+    input.clear_private_key();
+
+    return TWDataCreateWithBytes(outputData.data(), outputData.size());
+}
+
+TWData* _Nonnull TWSecureSignerSignUtxo(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    TWData* _Nonnull unsignedTx,
+    enum TWCoinType coin,
+    TWString* _Nonnull hkdfSalt
+) {
+    const Data& encrypted = *reinterpret_cast<const Data*>(encryptedMnemonic);
+    const std::string& path = *reinterpret_cast<const std::string*>(derivationPath);
+    const Data& txData = *reinterpret_cast<const Data*>(unsignedTx);
+    const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Decrypt mnemonic
+    std::string mnemonic;
+    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+        return TWDataCreateWithSize(0);
+    }
+
+    // Derive key
+    auto privateKeyOpt = deriveKey(mnemonic, path, coin);
+    memzero(mnemonic.data(), mnemonic.size());
+    if (!privateKeyOpt) {
+        return TWDataCreateWithSize(0);
+    }
+    PrivateKey& privateKey = *privateKeyOpt;
+
+    // Parse signing input and inject private key
+    Bitcoin::Proto::SigningInput input;
+    if (!input.ParseFromArray(txData.data(), (int)txData.size())) {
+        return TWDataCreateWithSize(0);
+    }
+
+    input.add_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+
+    // Sign
+    Data inputData(input.ByteSizeLong());
+    input.SerializeToArray(inputData.data(), (int)inputData.size());
+
+    Data outputData;
+    TW::anyCoinSign(coin, inputData, outputData);
 
     // Clear private key from protobuf
     input.clear_private_key();

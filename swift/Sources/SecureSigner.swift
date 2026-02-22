@@ -116,6 +116,47 @@ public enum SecureSigner {
         return TWDataNSData(result)
     }
 
+    /// Signs a UTXO transaction for any Bitcoin-family chain (BTC, LTC, DOGE, etc.).
+    ///
+    /// - Parameters:
+    ///   - encryptedMnemonic: SE-encrypted mnemonic blob
+    ///   - seKey: Secure Enclave private key for ECDH decryption
+    ///   - derivationPath: BIP44 derivation path (e.g., "m/44'/3'/0'/0/0" for DOGE)
+    ///   - unsignedTx: Serialized BitcoinSigningInput protobuf (without private key)
+    ///   - coin: Coin type (.bitcoin, .litecoin, .dogecoin, etc.)
+    ///   - hkdfSalt: Domain separator for HKDF key derivation (must match encryption salt)
+    /// - Returns: Signed transaction bytes, or empty Data on error
+    public static func signUtxo(
+        encryptedMnemonic: Data,
+        seKey: SecKey,
+        derivationPath: String,
+        unsignedTx: Data,
+        coin: CoinType,
+        hkdfSalt: String
+    ) -> Data {
+        let mnemonicPtr = TWDataCreateWithNSData(encryptedMnemonic)
+        let pathPtr = TWStringCreateWithNSString(derivationPath)
+        let txPtr = TWDataCreateWithNSData(unsignedTx)
+        let saltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        let result = TWSecureSignerSignUtxo(
+            mnemonicPtr,
+            keyPtr,
+            pathPtr,
+            txPtr,
+            TWCoinType(rawValue: coin.rawValue),
+            saltPtr
+        )
+
+        TWDataDelete(mnemonicPtr)
+        TWStringDelete(pathPtr)
+        TWDataDelete(txPtr)
+        TWStringDelete(saltPtr)
+
+        return TWDataNSData(result)
+    }
+
     /// Signs a Tron transaction using SE-encrypted mnemonic.
     ///
     /// - Parameters:

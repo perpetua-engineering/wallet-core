@@ -77,6 +77,26 @@ TWData* _Nonnull TWSecureSignerSignSolana(
     TWString* _Nonnull hkdfSalt
 );
 
+/// Sign a UTXO transaction for any Bitcoin-family chain (BTC, LTC, DOGE, etc.).
+/// Uses Bitcoin::Proto::SigningInput with the specified coin type for derivation and signing.
+///
+/// \param encryptedMnemonic SE-encrypted mnemonic blob
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param derivationPath BIP44 derivation path (e.g., "m/44'/3'/0'/0/0" for DOGE)
+/// \param unsignedTx Serialized BitcoinSigningInput protobuf (without private key)
+/// \param coin Coin type (TWCoinTypeBitcoin, TWCoinTypeLitecoin, TWCoinTypeDogecoin, etc.)
+/// \param hkdfSalt Domain separator for HKDF key derivation (e.g., "com.example.app.mnemonic.v1")
+/// \returns Signed transaction bytes, or empty data on error/non-Apple. Caller must delete.
+TW_EXPORT_STATIC_METHOD
+TWData* _Nonnull TWSecureSignerSignUtxo(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    TWData* _Nonnull unsignedTx,
+    enum TWCoinType coin,
+    TWString* _Nonnull hkdfSalt
+);
+
 /// Sign a Tron transaction using SE-encrypted mnemonic.
 ///
 /// \param encryptedMnemonic SE-encrypted mnemonic blob
