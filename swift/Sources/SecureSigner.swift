@@ -263,5 +263,43 @@ public enum SecureSigner {
 
         return TWDataNSData(result)
     }
+
+    /// Derives an address for any supported chain using SE-encrypted mnemonic.
+    /// Decrypts mnemonic, derives key, formats address, zeros all intermediates.
+    ///
+    /// - Parameters:
+    ///   - encryptedMnemonic: SE-encrypted mnemonic blob
+    ///   - seKey: Secure Enclave private key for ECDH decryption
+    ///   - derivationPath: BIP44 derivation path (e.g., "m/44'/60'/0'/0/0")
+    ///   - coin: Coin type (determines curve and address format)
+    ///   - hkdfSalt: Domain separator for HKDF key derivation (must match encryption salt)
+    /// - Returns: Address string, or nil on error
+    public static func deriveAddress(
+        encryptedMnemonic: Data,
+        seKey: SecKey,
+        derivationPath: String,
+        coin: CoinType,
+        hkdfSalt: String
+    ) -> String? {
+        let mnemonicPtr = TWDataCreateWithNSData(encryptedMnemonic)
+        let pathPtr = TWStringCreateWithNSString(derivationPath)
+        let saltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        let result = TWSecureSignerDeriveAddress(
+            mnemonicPtr,
+            keyPtr,
+            pathPtr,
+            TWCoinType(rawValue: coin.rawValue),
+            saltPtr
+        )
+
+        TWDataDelete(mnemonicPtr)
+        TWStringDelete(pathPtr)
+        TWStringDelete(saltPtr)
+
+        let address = TWStringNSString(result)
+        return address.isEmpty ? nil : address
+    }
 }
 #endif

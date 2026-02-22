@@ -39,6 +39,10 @@ TWData* _Nonnull TWSecureSignerSignDigest(
     TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, enum TWCoinType, TWString* _Nonnull) {
     return TWDataCreateWithSize(0);
 }
+TWString* _Nonnull TWSecureSignerDeriveAddress(
+    TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, enum TWCoinType, TWString* _Nonnull) {
+    return TWStringCreateWithUTF8Bytes("");
+}
 
 #else // __APPLE__
 
@@ -596,6 +600,38 @@ TWData* _Nonnull TWSecureSignerSignDigest(
     auto signature = privateKey.sign(digestData, TWCurveSECP256k1);
 
     return TWDataCreateWithBytes(signature.data(), signature.size());
+}
+
+TWString* _Nonnull TWSecureSignerDeriveAddress(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    enum TWCoinType coinType,
+    TWString* _Nonnull hkdfSalt
+) {
+    const Data& encrypted = *reinterpret_cast<const Data*>(encryptedMnemonic);
+    const std::string& path = *reinterpret_cast<const std::string*>(derivationPath);
+    const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Decrypt mnemonic
+    std::string mnemonic;
+    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+        return TWStringCreateWithUTF8Bytes("");
+    }
+
+    // Derive key
+    auto privateKeyOpt = deriveKey(mnemonic, path, coinType);
+    memzero(mnemonic.data(), mnemonic.size());
+    if (!privateKeyOpt) {
+        return TWStringCreateWithUTF8Bytes("");
+    }
+    PrivateKey& privateKey = *privateKeyOpt;
+
+    // Derive address
+    std::string address = TW::deriveAddress(coinType, privateKey);
+
+    return TWStringCreateWithUTF8Bytes(address.c_str());
 }
 
 #endif // __APPLE__

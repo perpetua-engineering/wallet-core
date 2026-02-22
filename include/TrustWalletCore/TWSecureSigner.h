@@ -151,4 +151,22 @@ TWData* _Nonnull TWSecureSignerSignDigest(
     TWString* _Nonnull hkdfSalt
 );
 
+/// Derive an address for any supported chain using SE-encrypted mnemonic.
+/// Decrypts mnemonic in C++, derives key, formats address, zeros all intermediates.
+///
+/// \param encryptedMnemonic SE-encrypted mnemonic blob
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param derivationPath BIP44 derivation path (e.g., "m/44'/60'/0'/0/0")
+/// \param coinType Coin type (determines curve and address format)
+/// \param hkdfSalt Domain separator for HKDF key derivation (e.g., "com.example.app.mnemonic.v1")
+/// \returns Address string, or empty string on error/non-Apple. Caller must delete.
+TW_EXPORT_STATIC_METHOD
+TWString* _Nonnull TWSecureSignerDeriveAddress(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    enum TWCoinType coinType,
+    TWString* _Nonnull hkdfSalt
+);
+
 TW_EXTERN_C_END
