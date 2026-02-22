@@ -47,6 +47,13 @@ TWString* _Nonnull TWSecureSignerDeriveAddress(
     TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, enum TWCoinType, TWString* _Nonnull) {
     return TWStringCreateWithUTF8Bytes("");
 }
+TWData* _Nullable TWSecureSignerDeriveSeed(
+    TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull) {
+    return nullptr;
+}
+void TWSecureSignerFreeSeed(TWData* _Nonnull seed) {
+    if (seed) TWDataDelete(seed);
+}
 
 #else // __APPLE__
 
@@ -669,6 +676,44 @@ TWString* _Nonnull TWSecureSignerDeriveAddress(
     std::string address = TW::deriveAddress(coinType, privateKey);
 
     return TWStringCreateWithUTF8Bytes(address.c_str());
+}
+
+TWData* _Nullable TWSecureSignerDeriveSeed(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSalt
+) {
+    const Data& encrypted = *reinterpret_cast<const Data*>(encryptedMnemonic);
+    const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Decrypt mnemonic
+    std::string mnemonic;
+    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+        return nullptr;
+    }
+
+    // Derive seed
+    try {
+        HDWallet<> wallet(mnemonic, "");
+        memzero(mnemonic.data(), mnemonic.size());
+
+        const auto& seed = wallet.getSeed();
+        TWData* result = TWDataCreateWithBytes(seed.data(), seed.size());
+        // HDWallet destructor zeros seed and mnemonic internally
+        return result;
+    } catch (...) {
+        memzero(mnemonic.data(), mnemonic.size());
+        return nullptr;
+    }
+}
+
+void TWSecureSignerFreeSeed(TWData* _Nonnull seed) {
+    if (!seed) return;
+    // TWData is const void* — we need to zero the underlying Data
+    auto* data = const_cast<Data*>(reinterpret_cast<const Data*>(seed));
+    memzero(data->data(), data->size());
+    TWDataDelete(seed);
 }
 
 #endif // __APPLE__

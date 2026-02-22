@@ -188,4 +188,27 @@ TWString* _Nonnull TWSecureSignerDeriveAddress(
     TWString* _Nonnull hkdfSalt
 );
 
+/// Decrypts SE-encrypted mnemonic and derives 64-byte BIP-39 seed.
+/// For use by zcash-signer's Rust FFI only — no Swift wrapper.
+/// Caller MUST call TWSecureSignerFreeSeed() to zero + free the buffer.
+/// The mnemonic is zeroed internally before this function returns.
+///
+/// \param encryptedMnemonic SE-encrypted mnemonic blob
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param hkdfSalt Domain separator for HKDF key derivation
+/// \returns 64-byte seed as TWData, or nullptr on error/non-Apple.
+TW_EXPORT_STATIC_METHOD
+TWData* _Nullable TWSecureSignerDeriveSeed(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSalt
+);
+
+/// Zeros and frees a seed buffer returned by TWSecureSignerDeriveSeed.
+/// Guarantees memzero before deallocation.
+///
+/// \param seed TWData returned by TWSecureSignerDeriveSeed
+TW_EXPORT_STATIC_METHOD
+void TWSecureSignerFreeSeed(TWData* _Nonnull seed);
+
 TW_EXTERN_C_END
