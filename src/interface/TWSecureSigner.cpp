@@ -23,6 +23,14 @@ TWData* _Nonnull TWSecureSignerSignSolana(
     TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, TWString* _Nonnull) {
     return TWDataCreateWithSize(0);
 }
+TWData* _Nonnull TWSecureSignerSignTron(
+    TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, TWString* _Nonnull) {
+    return TWDataCreateWithSize(0);
+}
+TWData* _Nonnull TWSecureSignerSignXrp(
+    TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, TWString* _Nonnull) {
+    return TWDataCreateWithSize(0);
+}
 TWData* _Nonnull TWSecureSignerSignDigest(
     TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, enum TWCoinType, TWString* _Nonnull) {
     return TWDataCreateWithSize(0);
@@ -43,6 +51,8 @@ TWData* _Nonnull TWSecureSignerSignDigest(
 #include "proto/Ethereum.pb.h"
 #include "proto/Bitcoin.pb.h"
 #include "proto/Solana.pb.h"
+#include "proto/Tron.pb.h"
+#include "proto/Ripple.pb.h"
 
 // C headers need extern "C" to prevent C++ name mangling
 extern "C" {
@@ -394,6 +404,102 @@ TWData* _Nonnull TWSecureSignerSignSolana(
 
     Data outputData;
     TW::anyCoinSign(TWCoinTypeSolana, inputData, outputData);
+
+    // Clear private key from protobuf
+    input.clear_private_key();
+
+    return TWDataCreateWithBytes(outputData.data(), outputData.size());
+}
+
+TWData* _Nonnull TWSecureSignerSignTron(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    TWData* _Nonnull unsignedTx,
+    TWString* _Nonnull hkdfSalt
+) {
+    const Data& encrypted = *reinterpret_cast<const Data*>(encryptedMnemonic);
+    const std::string& path = *reinterpret_cast<const std::string*>(derivationPath);
+    const Data& txData = *reinterpret_cast<const Data*>(unsignedTx);
+    const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Decrypt mnemonic
+    std::string mnemonic;
+    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+        return TWDataCreateWithSize(0);
+    }
+
+    // Derive key
+    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeTron);
+    memzero(mnemonic.data(), mnemonic.size());
+    if (!privateKeyOpt) {
+        return TWDataCreateWithSize(0);
+    }
+    PrivateKey& privateKey = *privateKeyOpt;
+
+    // Parse signing input and inject private key
+    Tron::Proto::SigningInput input;
+    if (!input.ParseFromArray(txData.data(), (int)txData.size())) {
+        return TWDataCreateWithSize(0);
+    }
+
+    input.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+
+    // Sign
+    Data inputData(input.ByteSizeLong());
+    input.SerializeToArray(inputData.data(), (int)inputData.size());
+
+    Data outputData;
+    TW::anyCoinSign(TWCoinTypeTron, inputData, outputData);
+
+    // Clear private key from protobuf
+    input.clear_private_key();
+
+    return TWDataCreateWithBytes(outputData.data(), outputData.size());
+}
+
+TWData* _Nonnull TWSecureSignerSignXrp(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    TWData* _Nonnull unsignedTx,
+    TWString* _Nonnull hkdfSalt
+) {
+    const Data& encrypted = *reinterpret_cast<const Data*>(encryptedMnemonic);
+    const std::string& path = *reinterpret_cast<const std::string*>(derivationPath);
+    const Data& txData = *reinterpret_cast<const Data*>(unsignedTx);
+    const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Decrypt mnemonic
+    std::string mnemonic;
+    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+        return TWDataCreateWithSize(0);
+    }
+
+    // Derive key
+    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeXRP);
+    memzero(mnemonic.data(), mnemonic.size());
+    if (!privateKeyOpt) {
+        return TWDataCreateWithSize(0);
+    }
+    PrivateKey& privateKey = *privateKeyOpt;
+
+    // Parse signing input and inject private key
+    Ripple::Proto::SigningInput input;
+    if (!input.ParseFromArray(txData.data(), (int)txData.size())) {
+        return TWDataCreateWithSize(0);
+    }
+
+    input.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+
+    // Sign
+    Data inputData(input.ByteSizeLong());
+    input.SerializeToArray(inputData.data(), (int)inputData.size());
+
+    Data outputData;
+    TW::anyCoinSign(TWCoinTypeXRP, inputData, outputData);
 
     // Clear private key from protobuf
     input.clear_private_key();

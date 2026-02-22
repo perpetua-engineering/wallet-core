@@ -116,6 +116,70 @@ public enum SecureSigner {
         return TWDataNSData(result)
     }
 
+    /// Signs a Tron transaction using SE-encrypted mnemonic.
+    ///
+    /// - Parameters:
+    ///   - encryptedMnemonic: SE-encrypted mnemonic blob
+    ///   - seKey: Secure Enclave private key for ECDH decryption
+    ///   - derivationPath: BIP44 derivation path (e.g., "m/44'/195'/0'/0/0")
+    ///   - unsignedTx: Serialized TronSigningInput protobuf (without private key)
+    ///   - hkdfSalt: Domain separator for HKDF key derivation (must match encryption salt)
+    /// - Returns: Signed transaction bytes, or empty Data on error
+    public static func signTron(
+        encryptedMnemonic: Data,
+        seKey: SecKey,
+        derivationPath: String,
+        unsignedTx: Data,
+        hkdfSalt: String
+    ) -> Data {
+        let mnemonicPtr = TWDataCreateWithNSData(encryptedMnemonic)
+        let pathPtr = TWStringCreateWithNSString(derivationPath)
+        let txPtr = TWDataCreateWithNSData(unsignedTx)
+        let saltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        let result = TWSecureSignerSignTron(mnemonicPtr, keyPtr, pathPtr, txPtr, saltPtr)
+
+        TWDataDelete(mnemonicPtr)
+        TWStringDelete(pathPtr)
+        TWDataDelete(txPtr)
+        TWStringDelete(saltPtr)
+
+        return TWDataNSData(result)
+    }
+
+    /// Signs an XRP transaction using SE-encrypted mnemonic.
+    ///
+    /// - Parameters:
+    ///   - encryptedMnemonic: SE-encrypted mnemonic blob
+    ///   - seKey: Secure Enclave private key for ECDH decryption
+    ///   - derivationPath: BIP44 derivation path (e.g., "m/44'/144'/0'/0/0")
+    ///   - unsignedTx: Serialized RippleSigningInput protobuf (without private key)
+    ///   - hkdfSalt: Domain separator for HKDF key derivation (must match encryption salt)
+    /// - Returns: Signed transaction bytes, or empty Data on error
+    public static func signXrp(
+        encryptedMnemonic: Data,
+        seKey: SecKey,
+        derivationPath: String,
+        unsignedTx: Data,
+        hkdfSalt: String
+    ) -> Data {
+        let mnemonicPtr = TWDataCreateWithNSData(encryptedMnemonic)
+        let pathPtr = TWStringCreateWithNSString(derivationPath)
+        let txPtr = TWDataCreateWithNSData(unsignedTx)
+        let saltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        let result = TWSecureSignerSignXrp(mnemonicPtr, keyPtr, pathPtr, txPtr, saltPtr)
+
+        TWDataDelete(mnemonicPtr)
+        TWStringDelete(pathPtr)
+        TWDataDelete(txPtr)
+        TWStringDelete(saltPtr)
+
+        return TWDataNSData(result)
+    }
+
     /// Signs a raw message digest using SE-encrypted mnemonic.
     ///
     /// Use for personal_sign, eth_sign, signTypedData after hashing.

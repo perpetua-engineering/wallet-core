@@ -77,6 +77,40 @@ TWData* _Nonnull TWSecureSignerSignSolana(
     TWString* _Nonnull hkdfSalt
 );
 
+/// Sign a Tron transaction using SE-encrypted mnemonic.
+///
+/// \param encryptedMnemonic SE-encrypted mnemonic blob
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param derivationPath BIP44 derivation path (e.g., "m/44'/195'/0'/0/0")
+/// \param unsignedTx Serialized TronSigningInput protobuf (without private key)
+/// \param hkdfSalt Domain separator for HKDF key derivation (e.g., "com.example.app.mnemonic.v1")
+/// \returns Signed transaction bytes, or empty data on error/non-Apple. Caller must delete.
+TW_EXPORT_STATIC_METHOD
+TWData* _Nonnull TWSecureSignerSignTron(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    TWData* _Nonnull unsignedTx,
+    TWString* _Nonnull hkdfSalt
+);
+
+/// Sign an XRP transaction using SE-encrypted mnemonic.
+///
+/// \param encryptedMnemonic SE-encrypted mnemonic blob
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param derivationPath BIP44 derivation path (e.g., "m/44'/144'/0'/0/0")
+/// \param unsignedTx Serialized RippleSigningInput protobuf (without private key)
+/// \param hkdfSalt Domain separator for HKDF key derivation (e.g., "com.example.app.mnemonic.v1")
+/// \returns Signed transaction bytes, or empty data on error/non-Apple. Caller must delete.
+TW_EXPORT_STATIC_METHOD
+TWData* _Nonnull TWSecureSignerSignXrp(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    TWData* _Nonnull unsignedTx,
+    TWString* _Nonnull hkdfSalt
+);
+
 /// Sign a raw message digest using SE-encrypted mnemonic.
 /// Use for personal_sign, eth_sign, signTypedData after hashing.
 ///
