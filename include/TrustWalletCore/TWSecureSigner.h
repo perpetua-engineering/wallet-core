@@ -151,6 +151,25 @@ TWData* _Nonnull TWSecureSignerSignDigest(
     TWString* _Nonnull hkdfSalt
 );
 
+/// Sign arbitrary message bytes with Ed25519 using SE-encrypted mnemonic.
+/// For Solana WalletConnect: signTransaction (sign message portion) and signMessage.
+/// Ed25519 performs its own internal SHA-512 hashing — input is the full message, not a hash.
+///
+/// \param encryptedMnemonic SE-encrypted mnemonic blob
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param derivationPath BIP44 derivation path (e.g., "m/44'/501'/0'/0/0")
+/// \param message Arbitrary-length message bytes to sign
+/// \param hkdfSalt Domain separator for HKDF key derivation (e.g., "com.example.app.mnemonic.v1")
+/// \returns 64-byte Ed25519 signature, or empty data on error/non-Apple. Caller must delete.
+TW_EXPORT_STATIC_METHOD
+TWData* _Nonnull TWSecureSignerSignEd25519(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    TWData* _Nonnull message,
+    TWString* _Nonnull hkdfSalt
+);
+
 /// Derive an address for any supported chain using SE-encrypted mnemonic.
 /// Decrypts mnemonic in C++, derives key, formats address, zeros all intermediates.
 ///

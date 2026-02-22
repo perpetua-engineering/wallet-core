@@ -264,6 +264,39 @@ public enum SecureSigner {
         return TWDataNSData(result)
     }
 
+    /// Signs arbitrary message bytes with Ed25519 using SE-encrypted mnemonic.
+    /// For Solana WalletConnect: signTransaction (message portion) and signMessage.
+    ///
+    /// - Parameters:
+    ///   - encryptedMnemonic: SE-encrypted mnemonic blob
+    ///   - seKey: Secure Enclave private key for ECDH decryption
+    ///   - derivationPath: BIP44 derivation path (e.g., "m/44'/501'/0'/0/0")
+    ///   - message: Arbitrary-length message bytes to sign
+    ///   - hkdfSalt: Domain separator for HKDF key derivation (must match encryption salt)
+    /// - Returns: 64-byte Ed25519 signature, or empty Data on error
+    public static func signEd25519(
+        encryptedMnemonic: Data,
+        seKey: SecKey,
+        derivationPath: String,
+        message: Data,
+        hkdfSalt: String
+    ) -> Data {
+        let mnemonicPtr = TWDataCreateWithNSData(encryptedMnemonic)
+        let pathPtr = TWStringCreateWithNSString(derivationPath)
+        let msgPtr = TWDataCreateWithNSData(message)
+        let saltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        let result = TWSecureSignerSignEd25519(mnemonicPtr, keyPtr, pathPtr, msgPtr, saltPtr)
+
+        TWDataDelete(mnemonicPtr)
+        TWStringDelete(pathPtr)
+        TWDataDelete(msgPtr)
+        TWStringDelete(saltPtr)
+
+        return TWDataNSData(result)
+    }
+
     /// Derives an address for any supported chain using SE-encrypted mnemonic.
     /// Decrypts mnemonic, derives key, formats address, zeros all intermediates.
     ///

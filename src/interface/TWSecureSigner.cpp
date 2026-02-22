@@ -39,6 +39,10 @@ TWData* _Nonnull TWSecureSignerSignDigest(
     TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, enum TWCoinType, TWString* _Nonnull) {
     return TWDataCreateWithSize(0);
 }
+TWData* _Nonnull TWSecureSignerSignEd25519(
+    TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, TWData* _Nonnull, TWString* _Nonnull) {
+    return TWDataCreateWithSize(0);
+}
 TWString* _Nonnull TWSecureSignerDeriveAddress(
     TWData* _Nonnull, const void* _Nonnull, TWString* _Nonnull, enum TWCoinType, TWString* _Nonnull) {
     return TWStringCreateWithUTF8Bytes("");
@@ -598,6 +602,39 @@ TWData* _Nonnull TWSecureSignerSignDigest(
 
     // Sign the digest with secp256k1 (for Ethereum-compatible chains)
     auto signature = privateKey.sign(digestData, TWCurveSECP256k1);
+
+    return TWDataCreateWithBytes(signature.data(), signature.size());
+}
+
+TWData* _Nonnull TWSecureSignerSignEd25519(
+    TWData* _Nonnull encryptedMnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull derivationPath,
+    TWData* _Nonnull message,
+    TWString* _Nonnull hkdfSalt
+) {
+    const Data& encrypted = *reinterpret_cast<const Data*>(encryptedMnemonic);
+    const std::string& path = *reinterpret_cast<const std::string*>(derivationPath);
+    const Data& messageData = *reinterpret_cast<const Data*>(message);
+    const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Decrypt mnemonic
+    std::string mnemonic;
+    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+        return TWDataCreateWithSize(0);
+    }
+
+    // Derive key (Solana uses Ed25519)
+    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeSolana);
+    memzero(mnemonic.data(), mnemonic.size());
+    if (!privateKeyOpt) {
+        return TWDataCreateWithSize(0);
+    }
+    PrivateKey& privateKey = *privateKeyOpt;
+
+    // Sign with Ed25519 (handles arbitrary-length messages, internal SHA-512)
+    Data signature = privateKey.sign(messageData, TWCurveED25519);
 
     return TWDataCreateWithBytes(signature.data(), signature.size());
 }
