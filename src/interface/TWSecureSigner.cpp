@@ -247,8 +247,9 @@ bool decryptMnemonic(const Data& encrypted, SecKeyRef seKey, const std::string& 
     chacha20poly1305_decrypt(&ctx, ciphertext, plaintext.data(), ciphertextLen);
 
     // Verify tag
+    // NOTE: chacha20poly1305_decrypt already feeds ciphertext to Poly1305 internally.
+    // Do NOT call rfc7539_auth here — that would double-feed and corrupt the tag.
     uint8_t computedTag[16];
-    rfc7539_auth(&ctx, ciphertext, ciphertextLen);
     rfc7539_finish(&ctx, 0, ciphertextLen, computedTag);
 
     memzero(symmetricKey, sizeof(symmetricKey));
