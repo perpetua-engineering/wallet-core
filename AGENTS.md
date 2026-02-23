@@ -49,6 +49,26 @@
 - `swift/Sources/SecureSigner.swift` — Swift wrapper (manually maintained)
 - `codegen/lib/templates/swift/TrustWalletCore.h.erb` — Updated to include `TWSecureSigner.h` for Apple platforms
 
+### API Surface
+
+| C function | Swift wrapper | Purpose |
+|---|---|---|
+| `TWSecureSignerSignEthereum` | `SecureSigner.signEthereum(...)` | ETH + all EVM chains |
+| `TWSecureSignerSignBitcoin` | `SecureSigner.signBitcoin(...)` | BTC only |
+| `TWSecureSignerSignUtxo` | `SecureSigner.signUtxo(..., coin:)` | Generic UTXO: BTC, DOGE, LTC, etc. |
+| `TWSecureSignerSignSolana` | `SecureSigner.signSolana(...)` | SOL |
+| `TWSecureSignerSignTron` | `SecureSigner.signTron(...)` | TRX |
+| `TWSecureSignerSignXrp` | `SecureSigner.signXrp(...)` | XRP |
+| `TWSecureSignerSignDigest` | `SecureSigner.signDigest(..., coin:)` | Raw 32-byte digest (secp256k1, 65-byte r+s+v) |
+| `TWSecureSignerSignEd25519` | `SecureSigner.signEd25519(...)` | Ed25519 message signing (64-byte sig, arbitrary-length input) |
+| `TWSecureSignerDeriveAddress` | `SecureSigner.deriveAddress(..., coin:)` | Address derivation for any chain |
+| `TWSecureSignerDeriveSeed` | **None — C FFI only** | 64-byte BIP-39 seed for zcash-signer Rust FFI |
+| `TWSecureSignerFreeSeed` | **None — C FFI only** | memzero + free seed from DeriveSeed |
+
+All signing/address methods share the same SE decryption preamble: ECDH → HKDF-SHA256 → ChaCha20-Poly1305 → memzero all intermediates.
+
+`DeriveSeed`/`FreeSeed` have no Swift wrapper by design — the seed must never reach Swift memory. These exist solely for zcash-signer's `zsig_pczt_sign_secure()` to call via C FFI.
+
 ### C/C++ Linkage
 TrezorCrypto headers are pure C. When including from C++ files, wrap in `extern "C"`:
 ```cpp
