@@ -35,6 +35,18 @@ ensure_rust_lib() {
   local target="$1"
   local out="${ROOT}/rust/target/${target}/release/libwallet_core_rs.a"
 
+  # Pin deployment targets so Rust objects match the C++ slices.
+  # Without this, rustc defaults to the active SDK version (e.g. 26.0)
+  # which produces "built for newer macOS/iOS" linker warnings.
+  case "$target" in
+    *-apple-watchos*)
+      export WATCHOS_DEPLOYMENT_TARGET="$WATCH_MIN" ;;
+    *-apple-ios*)
+      export IPHONEOS_DEPLOYMENT_TARGET="$IOS_MIN" ;;
+    *-apple-darwin*)
+      export MACOSX_DEPLOYMENT_TARGET="$MAC_MIN" ;;
+  esac
+
   if ! rustc --print target-list | grep -q "$target"; then
     echo "Rust target ${target} not installed. Add it via: rustup target add ${target}" >&2
     exit 1
