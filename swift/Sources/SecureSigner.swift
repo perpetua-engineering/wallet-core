@@ -319,6 +319,32 @@ public enum SecureSigner {
         return TWDataNSData(result)
     }
 
+    /// Imports a user-provided seed phrase: validates, SE-encrypts, zeroes the plaintext.
+    /// Swift never sees the mnemonic after this call returns.
+    ///
+    /// - Parameters:
+    ///   - mnemonic: BIP-39 mnemonic string (12 or 24 words)
+    ///   - seKey: Secure Enclave private key for ECDH encryption
+    ///   - hkdfSalt: Domain separator for HKDF key derivation (must match decryption salt)
+    /// - Returns: SE-encrypted mnemonic blob, or nil if invalid mnemonic or error
+    public static func importSeedPhrase(
+        mnemonic: String,
+        seKey: SecKey,
+        hkdfSalt: String
+    ) -> Data? {
+        let mnemonicPtr = TWStringCreateWithNSString(mnemonic)
+        let saltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        let result = TWSecureSignerImportSeedPhrase(mnemonicPtr, keyPtr, saltPtr)
+
+        TWStringDelete(mnemonicPtr)
+        TWStringDelete(saltPtr)
+
+        guard let result else { return nil }
+        return TWDataNSData(result)
+    }
+
     /// Derives an address for any supported chain using SE-encrypted mnemonic.
     /// Decrypts mnemonic, derives key, formats address, zeros all intermediates.
     ///

@@ -58,6 +58,10 @@ TWData* _Nullable TWSecureSignerCreateWallet(
     const void* _Nonnull, TWString* _Nonnull) {
     return nullptr;
 }
+TWData* _Nullable TWSecureSignerImportSeedPhrase(
+    TWString* _Nonnull, const void* _Nonnull, TWString* _Nonnull) {
+    return nullptr;
+}
 
 #else // __APPLE__
 
@@ -878,6 +882,32 @@ TWData* _Nullable TWSecureSignerCreateWallet(
     }
 
     // SE-encrypt the mnemonic — Swift never sees plaintext
+    Data encrypted = encryptMnemonic(mnemonic, seKey, salt);
+    memzero(mnemonic.data(), mnemonic.size());
+
+    if (encrypted.empty()) {
+        return nullptr;
+    }
+
+    return TWDataCreateWithBytes(encrypted.data(), encrypted.size());
+}
+
+TWData* _Nullable TWSecureSignerImportSeedPhrase(
+    TWString* _Nonnull mnemonicStr,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSalt
+) {
+    std::string mnemonic = *reinterpret_cast<const std::string*>(mnemonicStr);
+    const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Validate the provided mnemonic
+    if (!Mnemonic::isValid(mnemonic)) {
+        memzero(mnemonic.data(), mnemonic.size());
+        return nullptr;
+    }
+
+    // SE-encrypt the mnemonic — Swift never sees plaintext after this
     Data encrypted = encryptMnemonic(mnemonic, seKey, salt);
     memzero(mnemonic.data(), mnemonic.size());
 

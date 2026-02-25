@@ -224,4 +224,18 @@ TWData* _Nullable TWSecureSignerCreateWallet(
     TWString* _Nonnull hkdfSalt
 );
 
+/// Import a user-provided seed phrase: validate, SE-encrypt, zero the plaintext.
+/// Swift never sees the mnemonic after this call returns.
+///
+/// \param mnemonic BIP-39 mnemonic string (12 or 24 words)
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param hkdfSalt Domain separator for HKDF key derivation (must match decryption salt)
+/// \returns SE-encrypted mnemonic blob, or nullptr if invalid/error/non-Apple. Caller must delete.
+TW_EXPORT_STATIC_METHOD
+TWData* _Nullable TWSecureSignerImportSeedPhrase(
+    TWString* _Nonnull mnemonic,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSalt
+);
+
 TW_EXTERN_C_END
