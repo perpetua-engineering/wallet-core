@@ -62,6 +62,14 @@ TWData* _Nullable TWSecureSignerImportSeedPhrase(
     TWString* _Nonnull, const void* _Nonnull, TWString* _Nonnull) {
     return nullptr;
 }
+TWData* _Nullable TWSecureSignerImportRecovery(
+    TWData* _Nonnull, TWData* _Nonnull, TWData* _Nonnull,
+    uint32_t, uint8_t, TWString* _Nonnull,
+    const uint8_t* _Nullable, size_t, TWString* _Nullable,
+    const void* _Nonnull, TWString* _Nonnull,
+    TWSecureSignerProgressCallback _Nullable, const void* _Nullable) {
+    return nullptr;
+}
 
 #else // __APPLE__
 
@@ -91,6 +99,7 @@ extern "C" {
 #include <TrezorCrypto/chacha20poly1305/chacha20poly1305.h>
 #include <TrezorCrypto/ecdsa.h>
 #include <TrezorCrypto/nist256p1.h>
+#include <TrezorCrypto/pbkdf2.h>
 }
 
 #include <Security/Security.h>
@@ -909,6 +918,138 @@ TWData* _Nullable TWSecureSignerImportSeedPhrase(
 
     // SE-encrypt the mnemonic — Swift never sees plaintext after this
     Data encrypted = encryptMnemonic(mnemonic, seKey, salt);
+    memzero(mnemonic.data(), mnemonic.size());
+
+    if (encrypted.empty()) {
+        return nullptr;
+    }
+
+    return TWDataCreateWithBytes(encrypted.data(), encrypted.size());
+}
+
+TWData* _Nullable TWSecureSignerImportRecovery(
+    TWData* _Nonnull pbkdf2SaltData,
+    TWData* _Nonnull nonceData,
+    TWData* _Nonnull ciphertextData,
+    uint32_t iterations,
+    uint8_t payloadVersion,
+    TWString* _Nonnull secretStr,
+    const uint8_t* _Nullable pepper,
+    size_t pepperLen,
+    TWString* _Nullable serialStr,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSaltStr,
+    TWSecureSignerProgressCallback _Nullable progressCallback,
+    const void* _Nullable callbackContext
+) {
+    // Validate iteration count (DoS prevention)
+    if (iterations < 100000 || iterations > 10000000) {
+        return nullptr;
+    }
+
+    // Extract parameters
+    const auto& salt = *reinterpret_cast<const Data*>(pbkdf2SaltData);
+    const auto& nonce = *reinterpret_cast<const Data*>(nonceData);
+    const auto& ciphertext = *reinterpret_cast<const Data*>(ciphertextData);
+    const auto& secret = *reinterpret_cast<const std::string*>(secretStr);
+    const auto& hkdfSalt = *reinterpret_cast<const std::string*>(hkdfSaltStr);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Ciphertext must have at least 16 bytes for the Poly1305 tag
+    if (ciphertext.size() <= 16 || nonce.size() != 12) {
+        return nullptr;
+    }
+
+    // Build PBKDF2 password: secret || pepper
+    std::vector<uint8_t> password(secret.begin(), secret.end());
+    if (pepper && pepperLen > 0) {
+        password.insert(password.end(), pepper, pepper + pepperLen);
+    }
+
+    // Derive key using incremental PBKDF2-HMAC-SHA256 with progress callback
+    uint8_t derivedKey[32];
+    {
+        PBKDF2_HMAC_SHA256_CTX pctx;
+        pbkdf2_hmac_sha256_Init(&pctx, password.data(), (int)password.size(),
+                                salt.data(), (int)salt.size(), 1);
+
+        // Process in chunks for progress reporting
+        const uint32_t chunkSize = 1000;
+        uint32_t remaining = iterations;
+
+        while (remaining > 0) {
+            uint32_t batch = (remaining < chunkSize) ? remaining : chunkSize;
+            pbkdf2_hmac_sha256_Update(&pctx, batch);
+            remaining -= batch;
+
+            if (progressCallback) {
+                double progress = (double)(iterations - remaining) / (double)iterations;
+                progressCallback(progress, callbackContext);
+            }
+        }
+
+        pbkdf2_hmac_sha256_Final(&pctx, derivedKey);
+        memzero(&pctx, sizeof(pctx));
+    }
+
+    // Zero password buffer
+    memzero(password.data(), password.size());
+
+    // Build AAD: "CGREC" + version_byte + serial (for version >= 2)
+    std::vector<uint8_t> aad;
+    aad.push_back('C'); aad.push_back('G'); aad.push_back('R'); aad.push_back('E'); aad.push_back('C');
+    aad.push_back(payloadVersion);
+    if (serialStr) {
+        const auto& serial = *reinterpret_cast<const std::string*>(serialStr);
+        aad.insert(aad.end(), serial.begin(), serial.end());
+    }
+
+    // Split ciphertext and tag
+    size_t ciphertextOnly = ciphertext.size() - 16;
+    const uint8_t* ct = ciphertext.data();
+    const uint8_t* tag = ciphertext.data() + ciphertextOnly;
+
+    // Decrypt with ChaCha20-Poly1305 (RFC 7539) with AAD
+    std::vector<uint8_t> plaintext(ciphertextOnly);
+
+    chacha20poly1305_ctx ctx;
+    rfc7539_init(&ctx, derivedKey, nonce.data());
+
+    // Feed AAD to Poly1305
+    rfc7539_auth(&ctx, aad.data(), aad.size());
+
+    // Decrypt ciphertext
+    chacha20poly1305_decrypt(&ctx, ct, plaintext.data(), ciphertextOnly);
+
+    // Verify tag
+    uint8_t computedTag[16];
+    rfc7539_finish(&ctx, aad.size(), ciphertextOnly, computedTag);
+
+    memzero(derivedKey, sizeof(derivedKey));
+    memzero(&ctx, sizeof(ctx));
+
+    // Constant-time tag comparison
+    uint8_t diff = 0;
+    for (int i = 0; i < 16; i++) {
+        diff |= computedTag[i] ^ tag[i];
+    }
+
+    if (diff != 0) {
+        memzero(plaintext.data(), plaintext.size());
+        return nullptr;  // Wrong PIN or corrupted data
+    }
+
+    // Convert to string and validate as BIP-39 mnemonic
+    std::string mnemonic(plaintext.begin(), plaintext.end());
+    memzero(plaintext.data(), plaintext.size());
+
+    if (!Mnemonic::isValid(mnemonic)) {
+        memzero(mnemonic.data(), mnemonic.size());
+        return nullptr;  // Decrypted but not a valid mnemonic
+    }
+
+    // SE-encrypt the mnemonic — Swift never sees plaintext
+    Data encrypted = encryptMnemonic(mnemonic, seKey, hkdfSalt);
     memzero(mnemonic.data(), mnemonic.size());
 
     if (encrypted.empty()) {

@@ -345,6 +345,98 @@ public enum SecureSigner {
         return TWDataNSData(result)
     }
 
+    /// Decrypts a CGREC recovery payload, validates the mnemonic, and SE-encrypts it.
+    /// Performs PBKDF2-HMAC-SHA256 key derivation with progress reporting, then
+    /// ChaCha20-Poly1305 decryption, BIP-39 validation, and SE encryption.
+    /// The plaintext mnemonic never enters Swift memory.
+    ///
+    /// - Parameters:
+    ///   - pbkdf2Salt: PBKDF2 salt from the recovery payload (16 bytes)
+    ///   - nonce: ChaCha20-Poly1305 nonce (12 bytes)
+    ///   - ciphertext: Ciphertext + Poly1305 tag (tag is last 16 bytes)
+    ///   - iterations: PBKDF2 iteration count (100,000..10,000,000)
+    ///   - payloadVersion: CGREC payload version byte (for AAD construction)
+    ///   - secret: Normalized secret (PIN digits or lowercased passphrase)
+    ///   - pepper: Optional session binding pepper (23 bytes), nil if pepperVersion < 1
+    ///   - serial: Optional serial string for AAD binding
+    ///   - seKey: Secure Enclave private key for ECDH encryption
+    ///   - hkdfSalt: Domain separator for SE HKDF key derivation (must match decryption salt)
+    ///   - progress: Optional callback for KDF progress (0.0 to 1.0)
+    /// - Returns: SE-encrypted mnemonic blob, or nil on error (wrong PIN, invalid mnemonic, etc.)
+    public static func importRecovery(
+        pbkdf2Salt: Data,
+        nonce: Data,
+        ciphertext: Data,
+        iterations: UInt32,
+        payloadVersion: UInt8,
+        secret: String,
+        pepper: Data?,
+        serial: String?,
+        seKey: SecKey,
+        hkdfSalt: String,
+        progress: ((Double) -> Void)? = nil
+    ) -> Data? {
+        let saltPtr = TWDataCreateWithNSData(pbkdf2Salt)
+        let noncePtr = TWDataCreateWithNSData(nonce)
+        let ctPtr = TWDataCreateWithNSData(ciphertext)
+        let secretPtr = TWStringCreateWithNSString(secret)
+        let hkdfSaltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        let serialTWStr = serial.map { TWStringCreateWithNSString($0) }
+
+        // Copy pepper into a contiguous array so the pointer stays valid
+        let pepperBytes: [UInt8] = pepper.map { Array($0) } ?? []
+
+        // Bridge the Swift progress closure to a C function pointer via context
+        var progressClosure = progress
+
+        // Bridge the Swift progress closure to a C function pointer via context.
+        // withUnsafeMutablePointer keeps closurePtr alive for the duration of the call.
+        let cCallback: TWSecureSignerProgressCallback?
+        if progress != nil {
+            cCallback = { (p: Double, rawCtx: UnsafeRawPointer?) in
+                guard let rawCtx else { return }
+                let ptr = rawCtx.assumingMemoryBound(to: Optional<(Double) -> Void>.self)
+                ptr.pointee?(p)
+            }
+        } else {
+            cCallback = nil
+        }
+
+        let result = withUnsafeMutablePointer(to: &progressClosure) { closurePtr in
+            pepperBytes.withUnsafeBufferPointer { pepperBuf in
+                TWSecureSignerImportRecovery(
+                    saltPtr,
+                    noncePtr,
+                    ctPtr,
+                    iterations,
+                    payloadVersion,
+                    secretPtr,
+                    pepperBuf.isEmpty ? nil : pepperBuf.baseAddress,
+                    pepperBuf.count,
+                    serialTWStr,
+                    keyPtr,
+                    hkdfSaltPtr,
+                    cCallback,
+                    progress != nil ? UnsafeMutableRawPointer(closurePtr) : nil
+                )
+            }
+        }
+
+        TWDataDelete(saltPtr)
+        TWDataDelete(noncePtr)
+        TWDataDelete(ctPtr)
+        TWStringDelete(secretPtr)
+        TWStringDelete(hkdfSaltPtr)
+        if let serialTWStr {
+            TWStringDelete(serialTWStr)
+        }
+
+        guard let result else { return nil }
+        return TWDataNSData(result)
+    }
+
     /// Derives an address for any supported chain using SE-encrypted mnemonic.
     /// Decrypts mnemonic, derives key, formats address, zeros all intermediates.
     ///

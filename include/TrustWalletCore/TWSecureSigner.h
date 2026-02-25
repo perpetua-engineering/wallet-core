@@ -238,4 +238,47 @@ TWData* _Nullable TWSecureSignerImportSeedPhrase(
     TWString* _Nonnull hkdfSalt
 );
 
+/// Progress callback for long-running KDF operations (PBKDF2).
+/// Called periodically with progress from 0.0 to 1.0.
+/// The context pointer is passed through from the caller.
+typedef void (*TWSecureSignerProgressCallback)(double progress, const void* _Nullable context);
+
+/// Decrypt a CGREC recovery payload, validate the mnemonic, and SE-encrypt it.
+/// Performs PBKDF2-HMAC-SHA256 key derivation with progress reporting, then
+/// ChaCha20-Poly1305 decryption, mnemonic validation, and SE encryption.
+/// All sensitive intermediates (derived key, plaintext mnemonic) are zeroed.
+///
+/// Swift parses the CBOR envelope and passes raw crypto fields — no CBOR in C++.
+///
+/// \param pbkdf2Salt PBKDF2 salt from the recovery payload (16 bytes)
+/// \param nonce ChaCha20-Poly1305 nonce (12 bytes)
+/// \param ciphertext Ciphertext + Poly1305 tag (tag is last 16 bytes)
+/// \param iterations PBKDF2 iteration count (100,000..10,000,000)
+/// \param payloadVersion CGREC payload version byte (for AAD construction)
+/// \param secret Normalized secret (PIN digits or lowercased passphrase), UTF-8
+/// \param pepper Optional session binding pepper (23 bytes), or NULL if pepperVersion < 1
+/// \param pepperLen Length of pepper (0 if NULL)
+/// \param serial Optional serial string for AAD (version >= 2), or NULL
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param hkdfSalt Domain separator for SE HKDF key derivation (must match decryption salt)
+/// \param progressCallback Optional callback for KDF progress, or NULL
+/// \param callbackContext Opaque pointer passed to progressCallback
+/// \returns SE-encrypted mnemonic blob, or nullptr on error (wrong PIN, invalid mnemonic, etc.)
+TW_EXPORT_STATIC_METHOD
+TWData* _Nullable TWSecureSignerImportRecovery(
+    TWData* _Nonnull pbkdf2Salt,
+    TWData* _Nonnull nonce,
+    TWData* _Nonnull ciphertext,
+    uint32_t iterations,
+    uint8_t payloadVersion,
+    TWString* _Nonnull secret,
+    const uint8_t* _Nullable pepper,
+    size_t pepperLen,
+    TWString* _Nullable serial,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSalt,
+    TWSecureSignerProgressCallback _Nullable progressCallback,
+    const void* _Nullable callbackContext
+);
+
 TW_EXTERN_C_END
