@@ -54,6 +54,10 @@ TWData* _Nullable TWSecureSignerDeriveSeed(
 void TWSecureSignerFreeSeed(TWData* _Nonnull seed) {
     if (seed) TWDataDelete(seed);
 }
+TWData* _Nullable TWSecureSignerCreateWallet(
+    const void* _Nonnull, TWString* _Nonnull) {
+    return nullptr;
+}
 
 #else // __APPLE__
 
@@ -66,6 +70,7 @@ void TWSecureSignerFreeSeed(TWData* _Nonnull seed) {
 #include "Coin.h"
 #include "HexCoding.h"
 #include "PrivateKey.h"
+#include "Mnemonic.h"
 
 #include "proto/Ethereum.pb.h"
 #include "proto/Bitcoin.pb.h"
@@ -270,6 +275,139 @@ bool decryptMnemonic(const Data& encrypted, SecKeyRef seKey, const std::string& 
     memzero(plaintext.data(), plaintext.size());
 
     return true;
+}
+
+// Encrypt mnemonic using SE key
+// Returns blob: version(1) + ephemeralPub(65) + nonce(12) + ciphertext + tag(16)
+// Returns empty Data on failure.
+Data encryptMnemonic(const std::string& mnemonic, SecKeyRef seKey, const std::string& salt) {
+    // Get SE public key
+    SecKeyRef sePubKey = SecKeyCopyPublicKey(seKey);
+    if (!sePubKey) {
+        return {};
+    }
+
+    // Generate ephemeral P-256 key pair (software, not SE)
+    CFMutableDictionaryRef ephAttrs = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    int keySize = 256;
+    CFNumberRef keySizeRef = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &keySize);
+    CFDictionarySetValue(ephAttrs, kSecAttrKeyType, kSecAttrKeyTypeECSECPrimeRandom);
+    CFDictionarySetValue(ephAttrs, kSecAttrKeySizeInBits, keySizeRef);
+
+    CFErrorRef error = nullptr;
+    SecKeyRef ephPrivKey = SecKeyCreateRandomKey(ephAttrs, &error);
+    CFRelease(keySizeRef);
+    CFRelease(ephAttrs);
+
+    if (!ephPrivKey) {
+        if (error) CFRelease(error);
+        CFRelease(sePubKey);
+        return {};
+    }
+
+    // Get ephemeral public key in X9.63 format (65 bytes for P-256)
+    SecKeyRef ephPubKey = SecKeyCopyPublicKey(ephPrivKey);
+    if (!ephPubKey) {
+        CFRelease(ephPrivKey);
+        CFRelease(sePubKey);
+        return {};
+    }
+
+    CFErrorRef pubError = nullptr;
+    CFDataRef ephPubData = SecKeyCopyExternalRepresentation(ephPubKey, &pubError);
+    CFRelease(ephPubKey);
+
+    if (!ephPubData) {
+        if (pubError) CFRelease(pubError);
+        CFRelease(ephPrivKey);
+        CFRelease(sePubKey);
+        return {};
+    }
+
+    size_t ephPubLen = (size_t)CFDataGetLength(ephPubData);
+    if (ephPubLen != 65) {
+        CFRelease(ephPubData);
+        CFRelease(ephPrivKey);
+        CFRelease(sePubKey);
+        return {};
+    }
+
+    // ECDH: ephemeral private × SE public → shared secret
+    uint8_t sharedSecret[32];
+    {
+        CFMutableDictionaryRef params = CFDictionaryCreateMutable(
+            kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFErrorRef ecdhError = nullptr;
+        CFDataRef secretData = SecKeyCopyKeyExchangeResult(
+            ephPrivKey, kSecKeyAlgorithmECDHKeyExchangeStandard, sePubKey, params, &ecdhError);
+        CFRelease(params);
+        CFRelease(ephPrivKey);
+        CFRelease(sePubKey);
+
+        if (!secretData) {
+            if (ecdhError) CFRelease(ecdhError);
+            CFRelease(ephPubData);
+            return {};
+        }
+
+        CFIndex secretLen = CFDataGetLength(secretData);
+        if (secretLen < 32) {
+            CFRelease(secretData);
+            CFRelease(ephPubData);
+            return {};
+        }
+
+        memcpy(sharedSecret, CFDataGetBytePtr(secretData), 32);
+        CFRelease(secretData);
+    }
+
+    // HKDF-SHA256: shared secret + salt → symmetric key
+    uint8_t symmetricKey[32];
+    hkdfSha256(
+        (const uint8_t*)salt.data(), salt.size(),
+        sharedSecret, 32,
+        nullptr, 0,
+        symmetricKey, 32
+    );
+    memzero(sharedSecret, sizeof(sharedSecret));
+
+    // Generate 12-byte random nonce
+    uint8_t nonce[12];
+    if (SecRandomCopyBytes(kSecRandomDefault, sizeof(nonce), nonce) != errSecSuccess) {
+        memzero(symmetricKey, sizeof(symmetricKey));
+        CFRelease(ephPubData);
+        return {};
+    }
+
+    // ChaCha20-Poly1305 encrypt
+    size_t plaintextLen = mnemonic.size();
+    std::vector<uint8_t> ciphertext(plaintextLen);
+
+    chacha20poly1305_ctx ctx;
+    rfc7539_init(&ctx, symmetricKey, nonce);
+    chacha20poly1305_encrypt(&ctx, (const uint8_t*)mnemonic.data(), ciphertext.data(), plaintextLen);
+
+    uint8_t tag[16];
+    rfc7539_finish(&ctx, 0, plaintextLen, tag);
+
+    memzero(symmetricKey, sizeof(symmetricKey));
+    memzero(&ctx, sizeof(ctx));
+
+    // Build output blob: version(1) + ephemeralPub(65) + nonce(12) + ciphertext + tag(16)
+    Data result;
+    result.reserve(1 + 65 + 12 + plaintextLen + 16);
+    result.push_back(0x01); // version
+    const uint8_t* pubBytes = CFDataGetBytePtr(ephPubData);
+    result.insert(result.end(), pubBytes, pubBytes + 65);
+    result.insert(result.end(), nonce, nonce + 12);
+    result.insert(result.end(), ciphertext.begin(), ciphertext.end());
+    result.insert(result.end(), tag, tag + 16);
+
+    CFRelease(ephPubData);
+    memzero(ciphertext.data(), ciphertext.size());
+
+    return result;
 }
 
 // Derive private key from mnemonic and path
@@ -715,6 +853,39 @@ void TWSecureSignerFreeSeed(TWData* _Nonnull seed) {
     auto* data = const_cast<Data*>(reinterpret_cast<const Data*>(seed));
     memzero(data->data(), data->size());
     TWDataDelete(seed);
+}
+
+TWData* _Nullable TWSecureSignerCreateWallet(
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSalt
+) {
+    const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Generate a 256-bit (24-word) mnemonic
+    std::string mnemonic;
+    try {
+        HDWallet<> wallet(256, "");
+        mnemonic = wallet.getMnemonic();
+    } catch (...) {
+        return nullptr;
+    }
+
+    // Validate the generated mnemonic
+    if (!Mnemonic::isValid(mnemonic)) {
+        memzero(mnemonic.data(), mnemonic.size());
+        return nullptr;
+    }
+
+    // SE-encrypt the mnemonic — Swift never sees plaintext
+    Data encrypted = encryptMnemonic(mnemonic, seKey, salt);
+    memzero(mnemonic.data(), mnemonic.size());
+
+    if (encrypted.empty()) {
+        return nullptr;
+    }
+
+    return TWDataCreateWithBytes(encrypted.data(), encrypted.size());
 }
 
 #endif // __APPLE__

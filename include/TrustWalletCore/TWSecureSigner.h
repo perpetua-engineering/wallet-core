@@ -211,4 +211,17 @@ TWData* _Nullable TWSecureSignerDeriveSeed(
 TW_EXPORT_STATIC_METHOD
 void TWSecureSignerFreeSeed(TWData* _Nonnull seed);
 
+/// Generate a new 24-word wallet entirely in C++ and return SE-encrypted mnemonic blob.
+/// The mnemonic is generated, validated, SE-encrypted, and zeroed — Swift never sees plaintext.
+///
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param hkdfSalt Domain separator for HKDF key derivation (must match decryption salt)
+/// \returns SE-encrypted mnemonic blob (version + ephemeralPub + nonce + ciphertext + tag),
+///          or nullptr on error/non-Apple. Caller must delete.
+TW_EXPORT_STATIC_METHOD
+TWData* _Nullable TWSecureSignerCreateWallet(
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSalt
+);
+
 TW_EXTERN_C_END

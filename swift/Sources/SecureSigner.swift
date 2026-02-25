@@ -297,6 +297,28 @@ public enum SecureSigner {
         return TWDataNSData(result)
     }
 
+    /// Generates a new 24-word wallet entirely in C++ and returns the SE-encrypted mnemonic blob.
+    /// The mnemonic is generated, validated, encrypted, and zeroed — Swift never sees plaintext.
+    ///
+    /// - Parameters:
+    ///   - seKey: Secure Enclave private key for ECDH encryption
+    ///   - hkdfSalt: Domain separator for HKDF key derivation (must match decryption salt)
+    /// - Returns: SE-encrypted mnemonic blob, or nil on error
+    public static func createWallet(
+        seKey: SecKey,
+        hkdfSalt: String
+    ) -> Data? {
+        let saltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        let result = TWSecureSignerCreateWallet(keyPtr, saltPtr)
+
+        TWStringDelete(saltPtr)
+
+        guard let result else { return nil }
+        return TWDataNSData(result)
+    }
+
     /// Derives an address for any supported chain using SE-encrypted mnemonic.
     /// Decrypts mnemonic, derives key, formats address, zeros all intermediates.
     ///
