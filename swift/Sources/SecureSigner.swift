@@ -376,6 +376,11 @@ public enum SecureSigner {
         hkdfSalt: String,
         progress: ((Double) -> Void)? = nil
     ) -> Data? {
+        // Validate cryptographic parameter sizes at the Swift boundary
+        guard pbkdf2Salt.count == 16 else { return nil }
+        guard nonce.count == 12 else { return nil }
+        guard ciphertext.count > 16 else { return nil } // must have at least 1 byte + 16-byte tag
+
         let saltPtr = TWDataCreateWithNSData(pbkdf2Salt)
         let noncePtr = TWDataCreateWithNSData(nonce)
         let ctPtr = TWDataCreateWithNSData(ciphertext)
