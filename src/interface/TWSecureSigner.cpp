@@ -991,7 +991,7 @@ TWData* _Nullable TWSecureSignerImportRecovery(
     // Zero password buffer
     memzero(password.data(), password.size());
 
-    // Build AAD: "CGREC" + version_byte + serial (for version >= 2)
+    // Build AAD: "CGREC" + version_byte + serial (when present)
     std::vector<uint8_t> aad;
     aad.push_back('C'); aad.push_back('G'); aad.push_back('R'); aad.push_back('E'); aad.push_back('C');
     aad.push_back(payloadVersion);

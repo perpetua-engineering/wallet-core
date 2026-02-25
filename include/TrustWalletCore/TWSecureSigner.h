@@ -258,7 +258,7 @@ typedef void (*TWSecureSignerProgressCallback)(double progress, const void* _Nul
 /// \param secret Normalized secret (PIN digits or lowercased passphrase), UTF-8
 /// \param pepper Optional session binding pepper (23 bytes), or NULL if pepperVersion < 1
 /// \param pepperLen Length of pepper (0 if NULL)
-/// \param serial Optional serial string for AAD (version >= 2), or NULL
+/// \param serial Optional serial string included in AAD when non-NULL (all versions)
 /// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
 /// \param hkdfSalt Domain separator for SE HKDF key derivation (must match decryption salt)
 /// \param progressCallback Optional callback for KDF progress, or NULL
