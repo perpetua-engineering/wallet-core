@@ -224,14 +224,10 @@ bool decryptMnemonic(const Data& encrypted, SecKeyRef seKey, const std::string& 
 
     uint8_t version = encrypted[0];
 
-    if (version == 0x00) {
-        // Unencrypted - just copy
-        mnemonic = std::string(encrypted.begin() + 1, encrypted.end());
-        return true;
-    }
-
+    // Only SE-encrypted (version 0x01) is supported.
+    // Version 0x00 (unencrypted plaintext) removed — no fallback.
     if (version != 0x01) {
-        return false;  // Unknown version
+        return false;
     }
 
     // Parse encrypted blob
