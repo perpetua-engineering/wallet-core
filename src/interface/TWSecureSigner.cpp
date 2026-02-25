@@ -391,6 +391,9 @@ Data encryptMnemonic(const std::string& mnemonic, SecKeyRef seKey, const std::st
     }
 
     // ChaCha20-Poly1305 encrypt
+    // NOTE: memzero(mnemonic.data()) works correctly for BIP-39 mnemonics because
+    // they are always >22 chars (exceeding the 15-byte SSO threshold), so they
+    // are always heap-allocated and not stored inline in the std::string object.
     size_t plaintextLen = mnemonic.size();
     std::vector<uint8_t> ciphertext(plaintextLen);
 
@@ -416,6 +419,8 @@ Data encryptMnemonic(const std::string& mnemonic, SecKeyRef seKey, const std::st
 
     CFRelease(ephPubData);
     memzero(ciphertext.data(), ciphertext.size());
+    memzero(nonce, sizeof(nonce));
+    memzero(tag, sizeof(tag));
 
     return result;
 }
@@ -872,30 +877,30 @@ TWData* _Nullable TWSecureSignerCreateWallet(
     const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
-    // Generate a 256-bit (24-word) mnemonic
-    std::string mnemonic;
     try {
+        // Generate a 256-bit (24-word) mnemonic
         HDWallet<> wallet(256, "");
-        mnemonic = wallet.getMnemonic();
+        std::string mnemonic = wallet.getMnemonic();
+
+        // Validate the generated mnemonic
+        if (!Mnemonic::isValid(mnemonic)) {
+            memzero(mnemonic.data(), mnemonic.size());
+            return nullptr;
+        }
+
+        // SE-encrypt the mnemonic — Swift never sees plaintext
+        Data encrypted = encryptMnemonic(mnemonic, seKey, salt);
+        memzero(mnemonic.data(), mnemonic.size());
+
+        if (encrypted.empty()) {
+            return nullptr;
+        }
+
+        // wallet destructor runs here, zeroing its internal mnemonic copy
+        return TWDataCreateWithBytes(encrypted.data(), encrypted.size());
     } catch (...) {
         return nullptr;
     }
-
-    // Validate the generated mnemonic
-    if (!Mnemonic::isValid(mnemonic)) {
-        memzero(mnemonic.data(), mnemonic.size());
-        return nullptr;
-    }
-
-    // SE-encrypt the mnemonic — Swift never sees plaintext
-    Data encrypted = encryptMnemonic(mnemonic, seKey, salt);
-    memzero(mnemonic.data(), mnemonic.size());
-
-    if (encrypted.empty()) {
-        return nullptr;
-    }
-
-    return TWDataCreateWithBytes(encrypted.data(), encrypted.size());
 }
 
 TWData* _Nullable TWSecureSignerImportSeedPhrase(
@@ -952,8 +957,13 @@ TWData* _Nullable TWSecureSignerImportRecovery(
     const auto& hkdfSalt = *reinterpret_cast<const std::string*>(hkdfSaltStr);
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
+    // Validate parameter sizes (salt must be 16 bytes, nonce 12 bytes)
+    if (salt.size() != 16 || nonce.size() != 12) {
+        return nullptr;
+    }
+
     // Ciphertext must have at least 16 bytes for the Poly1305 tag
-    if (ciphertext.size() <= 16 || nonce.size() != 12) {
+    if (ciphertext.size() <= 16) {
         return nullptr;
     }
 
