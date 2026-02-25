@@ -159,13 +159,15 @@ EOF
 
 mkdir -p "$BUILD_ROOT"
 
-# ─── Dev mode: 2 slices, incremental, minimal xcframework ───
+# ─── Dev mode: 3 slices (macOS, iOS sim, Watch sim), incremental, minimal xcframework ───
 if $DEV_MODE; then
   ensure_rust_lib aarch64-apple-darwin
   ensure_rust_lib aarch64-apple-ios-sim
+  ensure_rust_lib aarch64-apple-watchos-sim
 
   build_slice macosx "$MAC_MIN" arm64 aarch64-apple-darwin MAC_ARM64_LIB
   build_slice iphonesimulator "$IOS_MIN" arm64 aarch64-apple-ios-sim IOS_SIM_ARM64_LIB
+  build_slice watchsimulator "$WATCH_MIN" arm64 aarch64-apple-watchos-sim WATCH_SIM_ARM64_LIB
 
   TREZOR_MAC_ARM64="${BUILD_ROOT}/macosx-arm64/trezor-crypto/libTrezorCrypto.a"
   PROTOBUF_MAC_ARM64="${BUILD_ROOT}/macosx-arm64/libprotobuf.a"
@@ -177,9 +179,15 @@ if $DEV_MODE; then
   RUST_IOS_SIM_ARM64="${RUST_TARGET_DIR}/aarch64-apple-ios-sim/release/libwallet_core_rs.a"
   IOS_SIM_ARM64_COMBINED="${BUILD_ROOT}/iphonesimulator-arm64/libWalletCore-combined.a"
 
+  TREZOR_WATCH_SIM_ARM64="${BUILD_ROOT}/watchsimulator-arm64/trezor-crypto/libTrezorCrypto.a"
+  PROTOBUF_WATCH_SIM_ARM64="${BUILD_ROOT}/watchsimulator-arm64/libprotobuf.a"
+  RUST_WATCH_SIM_ARM64="${RUST_TARGET_DIR}/aarch64-apple-watchos-sim/release/libwallet_core_rs.a"
+  WATCH_SIM_ARM64_COMBINED="${BUILD_ROOT}/watchsimulator-arm64/libWalletCore-combined.a"
+
   echo "==> Combining libs (dev)"
   combine_libs "$MAC_ARM64_COMBINED" "$MAC_ARM64_LIB" "$TREZOR_MAC_ARM64" "$RUST_MAC_ARM64" "$PROTOBUF_MAC_ARM64"
   combine_libs "$IOS_SIM_ARM64_COMBINED" "$IOS_SIM_ARM64_LIB" "$TREZOR_IOS_SIM_ARM64" "$RUST_IOS_SIM_ARM64" "$PROTOBUF_IOS_SIM_ARM64"
+  combine_libs "$WATCH_SIM_ARM64_COMBINED" "$WATCH_SIM_ARM64_LIB" "$TREZOR_WATCH_SIM_ARM64" "$RUST_WATCH_SIM_ARM64" "$PROTOBUF_WATCH_SIM_ARM64"
 
   stage_headers
 
@@ -187,13 +195,14 @@ if $DEV_MODE; then
   rm -rf "$XCFRAMEWORK_PATH"
   xcodebuild -create-xcframework \
     -library "$IOS_SIM_ARM64_COMBINED" -headers "$HEADER_STAGE" \
+    -library "$WATCH_SIM_ARM64_COMBINED" -headers "$HEADER_STAGE" \
     -library "$MAC_ARM64_COMBINED" -headers "$HEADER_STAGE" \
     -output "$XCFRAMEWORK_PATH"
 
   echo "✅ Dev build done. XCFramework at ${XCFRAMEWORK_PATH}"
-  echo "   Platforms: macOS arm64, iOS Simulator arm64"
+  echo "   Platforms: macOS arm64, iOS Simulator arm64, watchOS Simulator arm64"
   echo "   Good for: swift test, simulator builds"
-  echo "   NOT for: TestFlight, device, watchOS"
+  echo "   NOT for: TestFlight, device"
   exit 0
 fi
 
