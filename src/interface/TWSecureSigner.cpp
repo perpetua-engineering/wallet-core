@@ -274,6 +274,7 @@ bool decryptMnemonic(const Data& encrypted, SecKeyRef seKey, const std::string& 
     for (int i = 0; i < 16; i++) {
         diff |= computedTag[i] ^ tag[i];
     }
+    memzero(computedTag, sizeof(computedTag));
 
     if (diff != 0) {
         memzero(plaintext.data(), plaintext.size());
@@ -1029,6 +1030,7 @@ TWData* _Nullable TWSecureSignerImportRecovery(
     for (int i = 0; i < 16; i++) {
         diff |= computedTag[i] ^ tag[i];
     }
+    memzero(computedTag, sizeof(computedTag));
 
     if (diff != 0) {
         memzero(plaintext.data(), plaintext.size());
