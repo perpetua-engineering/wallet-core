@@ -224,6 +224,11 @@ protocol::TriggerSmartContract to_internal(const Proto::TransferTRC20Contract& t
 
     // Encode smart contract call parameters
     auto contract_params = parse_hex(TRANSFER_TOKEN_FUNCTION);
+
+    // TRON addresses in ABI parameters must be 20 bytes (strip 0x41 prefix) and padded to 32 bytes
+    if (toAddress.size() == 21 && toAddress[0] == 0x41) {
+        toAddress.erase(toAddress.begin());
+    }
     pad_left(toAddress, 32);
     pad_left(amount, 32);
     append(contract_params, toAddress);
