@@ -421,10 +421,12 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
             auto parsed = nlohmann::json::parse(input.raw_json());
             if (parsed.contains("txID") && parsed["txID"].is_string()) {
                 hash = parse_hex(parsed["txID"].get<std::string>());
+            } else if (parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
+                // Compute txID = SHA256(raw_data) when dApp omits txID
+                hash = Hash::sha256(parse_hex(parsed["raw_data_hex"].get<std::string>()));
             } else {
-                // If txID is not present, return an error
                 output.set_error(Common::Proto::Error_invalid_params);
-                output.set_error_message("No txID found in raw JSON");
+                output.set_error_message("No txID or raw_data_hex found in raw JSON");
                 return output;
             }
         } catch (const std::exception& e) {
@@ -437,8 +439,24 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
 
     const auto signature = key.sign(hash);
     output.set_signature(signature.data(), signature.size());
-    output.set_id(input.txid());
     output.set_id(hash.data(), hash.size());
+
+    // Produce signed JSON: inject signature array into the original transaction
+    if (!input.raw_json().empty()) {
+        try {
+            auto parsed = nlohmann::json::parse(input.raw_json());
+            parsed["signature"] = nlohmann::json::array({hex(signature)});
+            // Ensure txID is present in the output JSON
+            if (!parsed.contains("txID") || !parsed["txID"].is_string()) {
+                parsed["txID"] = hex(hash);
+            }
+            auto json = parsed.dump();
+            output.set_json(json.data(), json.size());
+        } catch (...) {
+            // Best effort — signature is still in the output
+        }
+    }
+
     return output;
 }
 
