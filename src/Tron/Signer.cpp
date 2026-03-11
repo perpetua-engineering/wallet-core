@@ -323,6 +323,19 @@ Data serializeRawDataJSON(const json& rawDataJSON) {
     return Data(serialized.begin(), serialized.end());
 }
 
+/// Returns a reference to the actual transaction object within the JSON.
+/// Some dApps (e.g. SUN.io) wrap transactions in one or more {"transaction": {...}} layers.
+/// Recursively unwraps until we find the object with raw_data/raw_data_hex/txID.
+json& findTransactionObject(json& parsed) {
+    if (parsed.contains("raw_data") || parsed.contains("raw_data_hex") || parsed.contains("txID")) {
+        return parsed;
+    }
+    if (parsed.contains("transaction") && parsed["transaction"].is_object()) {
+        return findTransactionObject(parsed["transaction"]);
+    }
+    return parsed;
+}
+
 bool ensureTransactionHashes(json& parsed, std::string& errorMessage) {
     if (parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
         if (!parsed.contains("txID") || !parsed["txID"].is_string()) {
@@ -748,13 +761,14 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
     } else if (!input.raw_json().empty()) {
         try {
             auto parsed = json::parse(input.raw_json());
+            auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
-            if (!ensureTransactionHashes(parsed, errorMessage)) {
+            if (!ensureTransactionHashes(txObj, errorMessage)) {
                 output.set_error(Common::Proto::Error_invalid_params);
                 output.set_error_message(errorMessage);
                 return output;
             }
-            hash = parse_hex(stripHexPrefix(parsed["txID"].get<std::string>()));
+            hash = parse_hex(stripHexPrefix(txObj["txID"].get<std::string>()));
         } catch (const std::exception& e) {
             output.set_error(Common::Proto::Error_invalid_params);
             output.set_error_message(e.what());
@@ -766,14 +780,16 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
     output.set_signature(signature.data(), signature.size());
     output.set_id(hash.data(), hash.size());
 
-    // Produce signed JSON: inject signature array into the original transaction
+    // Produce signed JSON: inject signature into the transaction object,
+    // preserving the original wrapper structure (e.g. {"transaction": {...}})
     if (!input.raw_json().empty()) {
         try {
             auto parsed = json::parse(input.raw_json());
+            auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
-            if (ensureTransactionHashes(parsed, errorMessage)) {
-                parsed["signature"] = json::array({hex(signature)});
-                parsed["txID"] = hex(hash);
+            if (ensureTransactionHashes(txObj, errorMessage)) {
+                txObj["signature"] = json::array({hex(signature)});
+                txObj["txID"] = hex(hash);
                 auto jsonString = parsed.dump();
                 output.set_json(jsonString.data(), jsonString.size());
             }
@@ -829,16 +845,17 @@ Proto::SigningOutput Signer::compile(const Data& signature) const {
     if (!input.raw_json().empty()) {
         try {
             auto parsed = json::parse(input.raw_json());
+            auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
-            if (!ensureTransactionHashes(parsed, errorMessage)) {
+            if (!ensureTransactionHashes(txObj, errorMessage)) {
                 output.set_error(Common::Proto::Error_invalid_params);
                 output.set_error_message(errorMessage);
                 return output;
             }
-            parsed["signature"] = json::array({hex(signature)});
+            txObj["signature"] = json::array({hex(signature)});
             output.set_json(parsed.dump());
             output.set_signature(signature.data(), signature.size());
-            auto txID = parse_hex(stripHexPrefix(parsed["txID"].get<std::string>()));
+            auto txID = parse_hex(stripHexPrefix(txObj["txID"].get<std::string>()));
             output.set_id(txID.data(), txID.size());
             return output;
         } catch (const std::exception& e) {
@@ -863,10 +880,11 @@ Data Signer::signaturePreimage() const {
     if (!input.raw_json().empty()) {
         try {
             auto parsed = json::parse(input.raw_json());
+            auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
-            if (ensureTransactionHashes(parsed, errorMessage) &&
-                parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
-                return parse_hex(stripHexPrefix(parsed["raw_data_hex"].get<std::string>()));
+            if (ensureTransactionHashes(txObj, errorMessage) &&
+                txObj.contains("raw_data_hex") && txObj["raw_data_hex"].is_string()) {
+                return parse_hex(stripHexPrefix(txObj["raw_data_hex"].get<std::string>()));
             }
             return {};
         } catch (...) {
@@ -880,10 +898,11 @@ Data Signer::signaturePreimageHash() const {
     if (!input.raw_json().empty()) {
         try {
             auto parsed = json::parse(input.raw_json());
+            auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
-            if (ensureTransactionHashes(parsed, errorMessage) &&
-                parsed.contains("txID") && parsed["txID"].is_string()) {
-                return parse_hex(stripHexPrefix(parsed["txID"].get<std::string>()));
+            if (ensureTransactionHashes(txObj, errorMessage) &&
+                txObj.contains("txID") && txObj["txID"].is_string()) {
+                return parse_hex(stripHexPrefix(txObj["txID"].get<std::string>()));
             }
             return {};
         } catch (...) {
