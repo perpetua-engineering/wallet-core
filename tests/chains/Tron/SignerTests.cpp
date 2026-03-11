@@ -120,6 +120,36 @@ TEST(TronSigner, SignDirectRawJsonTriggerSmartContractWithoutTxIdOrRawDataHex) {
     ASSERT_EQ(hex(output.signature()), "bec790877b3a008640781e3948b070740b1f6023c29ecb3f7b5835433c13fc5835e5cad3bd44360ff2ddad5ed7dc9d7dee6878f90e86a40355b7697f5954b88c01");
 }
 
+TEST(TronSigner, SignDirectRawJsonWithTxIdSkipsUnsupportedRawDataNormalization) {
+    auto input = Proto::SigningInput();
+    const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
+    input.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    auto rawJson = R"({
+        "raw_data": {
+            "contract": [{
+                "parameter": {
+                    "value": {
+                        "owner_address": "415cd0fb0ab3ce40f3051414c604b27756e69e43db"
+                    }
+                },
+                "type": "AccountCreateContract"
+            }],
+            "expiration": 1539331479000,
+            "ref_block_bytes": "7b3b",
+            "ref_block_hash": "b21ace8d6ac20e7e",
+            "timestamp": 1539295479000
+        },
+        "txID": "546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb",
+        "visible": false
+    })";
+    input.set_raw_json(rawJson);
+
+    const auto output = Signer::sign(input);
+
+    ASSERT_EQ(hex(output.id()), "546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb");
+    ASSERT_EQ(hex(output.signature()), "77f5eabde31e739d34a66914540f1756981dc7d782c9656f5e14e53b59a15371603a183aa12124adeee7991bf55acc8e488a6ca04fb393b1a8ac16610eeafdfc00");
+}
+
 TEST(TronSigner, SignTransferAsset) {
     auto input = Proto::SigningInput();
     auto& transaction = *input.mutable_transaction();

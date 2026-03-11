@@ -324,15 +324,6 @@ Data serializeRawDataJSON(const json& rawDataJSON) {
 }
 
 bool ensureTransactionHashes(json& parsed, std::string& errorMessage) {
-    if (parsed.contains("raw_data") && parsed["raw_data"].is_object()) {
-        const auto rawData = serializeRawDataJSON(parsed["raw_data"]);
-        parsed["raw_data_hex"] = hex(rawData);
-        if (!parsed.contains("txID") || !parsed["txID"].is_string()) {
-            parsed["txID"] = hex(Hash::sha256(rawData));
-        }
-        return true;
-    }
-
     if (parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
         if (!parsed.contains("txID") || !parsed["txID"].is_string()) {
             parsed["txID"] = hex(Hash::sha256(parse_hex(stripHexPrefix(parsed["raw_data_hex"].get<std::string>()))));
@@ -341,6 +332,13 @@ bool ensureTransactionHashes(json& parsed, std::string& errorMessage) {
     }
 
     if (parsed.contains("txID") && parsed["txID"].is_string()) {
+        return true;
+    }
+
+    if (parsed.contains("raw_data") && parsed["raw_data"].is_object()) {
+        const auto rawData = serializeRawDataJSON(parsed["raw_data"]);
+        parsed["raw_data_hex"] = hex(rawData);
+        parsed["txID"] = hex(Hash::sha256(rawData));
         return true;
     }
 
