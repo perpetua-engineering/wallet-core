@@ -14,10 +14,341 @@
 #include <nlohmann/json.hpp>
 #include <cassert>
 #include <chrono>
+#include <stdexcept>
 
 namespace TW::Tron {
 
 const std::string TRANSFER_TOKEN_FUNCTION = "0xa9059cbb";
+using json = nlohmann::json;
+
+namespace {
+
+std::string stripHexPrefix(std::string value) {
+    if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0) {
+        return value.substr(2);
+    }
+    return value;
+}
+
+const json& requireField(const json& object, const char* key) {
+    if (!object.contains(key)) {
+        throw std::invalid_argument(std::string("Missing required field: ") + key);
+    }
+    return object.at(key);
+}
+
+std::string requireString(const json& object, const char* key) {
+    const auto& value = requireField(object, key);
+    if (!value.is_string()) {
+        throw std::invalid_argument(std::string("Expected string for field: ") + key);
+    }
+    return value.get<std::string>();
+}
+
+int64_t requireInt64(const json& object, const char* key) {
+    const auto& value = requireField(object, key);
+    if (value.is_number_integer()) {
+        return value.get<int64_t>();
+    }
+    if (value.is_number_unsigned()) {
+        return static_cast<int64_t>(value.get<uint64_t>());
+    }
+    if (value.is_string()) {
+        return std::stoll(value.get<std::string>());
+    }
+    throw std::invalid_argument(std::string("Expected integer for field: ") + key);
+}
+
+bool optionalBool(const json& object, const char* key, bool defaultValue = false) {
+    if (!object.contains(key)) {
+        return defaultValue;
+    }
+    const auto& value = object.at(key);
+    if (!value.is_boolean()) {
+        throw std::invalid_argument(std::string("Expected bool for field: ") + key);
+    }
+    return value.get<bool>();
+}
+
+Data parseHexField(const json& object, const char* key) {
+    return parse_hex(stripHexPrefix(requireString(object, key)));
+}
+
+Data parseAddressField(const json& object, const char* key) {
+    const auto value = requireString(object, key);
+    if (!value.empty() && value.front() == 'T') {
+        return Base58::decodeCheck(value);
+    }
+    return parse_hex(stripHexPrefix(value));
+}
+
+protocol::ResourceCode parseResourceCodeField(const json& object, const char* key) {
+    const auto resourceName = requireString(object, key);
+    protocol::ResourceCode resource;
+    if (!protocol::ResourceCode_Parse(resourceName, &resource)) {
+        throw std::invalid_argument(std::string("Invalid resource code: ") + resourceName);
+    }
+    return resource;
+}
+
+protocol::Transaction::Contract parseContract(const json& contractJSON) {
+    const auto contractTypeName = requireString(contractJSON, "type");
+    protocol::Transaction::Contract::ContractType contractType;
+    if (!protocol::Transaction::Contract::ContractType_Parse(contractTypeName, &contractType)) {
+        throw std::invalid_argument(std::string("Unsupported contract type: ") + contractTypeName);
+    }
+
+    const auto& parameter = requireField(contractJSON, "parameter");
+    const auto& value = requireField(parameter, "value");
+    if (!value.is_object()) {
+        throw std::invalid_argument("Expected parameter.value object");
+    }
+
+    protocol::Transaction::Contract contract;
+    contract.set_type(contractType);
+    google::protobuf::Any any;
+
+    switch (contractType) {
+    case protocol::Transaction::Contract::TransferContract: {
+        protocol::TransferContract transfer;
+        const auto owner = parseAddressField(value, "owner_address");
+        const auto to = parseAddressField(value, "to_address");
+        transfer.set_owner_address(owner.data(), owner.size());
+        transfer.set_to_address(to.data(), to.size());
+        transfer.set_amount(requireInt64(value, "amount"));
+        any.PackFrom(transfer);
+        break;
+    }
+    case protocol::Transaction::Contract::TransferAssetContract: {
+        protocol::TransferAssetContract transfer;
+        const auto assetName = parseHexField(value, "asset_name");
+        const auto owner = parseAddressField(value, "owner_address");
+        const auto to = parseAddressField(value, "to_address");
+        transfer.set_asset_name(assetName.data(), assetName.size());
+        transfer.set_owner_address(owner.data(), owner.size());
+        transfer.set_to_address(to.data(), to.size());
+        transfer.set_amount(requireInt64(value, "amount"));
+        any.PackFrom(transfer);
+        break;
+    }
+    case protocol::Transaction::Contract::FreezeBalanceContract: {
+        protocol::FreezeBalanceContract freeze;
+        const auto owner = parseAddressField(value, "owner_address");
+        const auto receiver = parseAddressField(value, "receiver_address");
+        freeze.set_owner_address(owner.data(), owner.size());
+        freeze.set_receiver_address(receiver.data(), receiver.size());
+        freeze.set_frozen_balance(requireInt64(value, "frozen_balance"));
+        freeze.set_frozen_duration(requireInt64(value, "frozen_duration"));
+        freeze.set_resource(parseResourceCodeField(value, "resource"));
+        any.PackFrom(freeze);
+        break;
+    }
+    case protocol::Transaction::Contract::FreezeBalanceV2Contract: {
+        protocol::FreezeBalanceV2Contract freeze;
+        const auto owner = parseAddressField(value, "owner_address");
+        freeze.set_owner_address(owner.data(), owner.size());
+        freeze.set_frozen_balance(requireInt64(value, "frozen_balance"));
+        freeze.set_resource(parseResourceCodeField(value, "resource"));
+        any.PackFrom(freeze);
+        break;
+    }
+    case protocol::Transaction::Contract::UnfreezeBalanceContract: {
+        protocol::UnfreezeBalanceContract unfreeze;
+        const auto owner = parseAddressField(value, "owner_address");
+        const auto receiver = parseAddressField(value, "receiver_address");
+        unfreeze.set_owner_address(owner.data(), owner.size());
+        unfreeze.set_receiver_address(receiver.data(), receiver.size());
+        unfreeze.set_resource(parseResourceCodeField(value, "resource"));
+        any.PackFrom(unfreeze);
+        break;
+    }
+    case protocol::Transaction::Contract::UnfreezeBalanceV2Contract: {
+        protocol::UnfreezeBalanceV2Contract unfreeze;
+        const auto owner = parseAddressField(value, "owner_address");
+        unfreeze.set_owner_address(owner.data(), owner.size());
+        unfreeze.set_unfreeze_balance(requireInt64(value, "unfreeze_balance"));
+        unfreeze.set_resource(parseResourceCodeField(value, "resource"));
+        any.PackFrom(unfreeze);
+        break;
+    }
+    case protocol::Transaction::Contract::WithdrawExpireUnfreezeContract: {
+        protocol::WithdrawExpireUnfreezeContract withdraw;
+        const auto owner = parseAddressField(value, "owner_address");
+        withdraw.set_owner_address(owner.data(), owner.size());
+        any.PackFrom(withdraw);
+        break;
+    }
+    case protocol::Transaction::Contract::DelegateResourceContract: {
+        protocol::DelegateResourceContract delegate;
+        const auto owner = parseAddressField(value, "owner_address");
+        const auto receiver = parseAddressField(value, "receiver_address");
+        delegate.set_owner_address(owner.data(), owner.size());
+        delegate.set_receiver_address(receiver.data(), receiver.size());
+        delegate.set_resource(parseResourceCodeField(value, "resource"));
+        delegate.set_balance(requireInt64(value, "balance"));
+        delegate.set_lock(optionalBool(value, "lock"));
+        any.PackFrom(delegate);
+        break;
+    }
+    case protocol::Transaction::Contract::UnDelegateResourceContract: {
+        protocol::UnDelegateResourceContract undelegate;
+        const auto owner = parseAddressField(value, "owner_address");
+        const auto receiver = parseAddressField(value, "receiver_address");
+        undelegate.set_owner_address(owner.data(), owner.size());
+        undelegate.set_receiver_address(receiver.data(), receiver.size());
+        undelegate.set_resource(parseResourceCodeField(value, "resource"));
+        undelegate.set_balance(requireInt64(value, "balance"));
+        any.PackFrom(undelegate);
+        break;
+    }
+    case protocol::Transaction::Contract::VoteAssetContract: {
+        protocol::VoteAssetContract vote;
+        const auto owner = parseAddressField(value, "owner_address");
+        vote.set_owner_address(owner.data(), owner.size());
+        vote.set_support(optionalBool(value, "support"));
+        vote.set_count(static_cast<int32_t>(requireInt64(value, "count")));
+        const auto& addresses = requireField(value, "vote_address");
+        if (!addresses.is_array()) {
+            throw std::invalid_argument("Expected vote_address array");
+        }
+        for (const auto& addressJSON : addresses) {
+            if (!addressJSON.is_string()) {
+                throw std::invalid_argument("Expected vote_address string");
+            }
+            const auto address = addressJSON.get<std::string>();
+            const auto decoded = (!address.empty() && address.front() == 'T')
+                ? Base58::decodeCheck(address)
+                : parse_hex(stripHexPrefix(address));
+            vote.add_vote_address(decoded.data(), decoded.size());
+        }
+        any.PackFrom(vote);
+        break;
+    }
+    case protocol::Transaction::Contract::VoteWitnessContract: {
+        protocol::VoteWitnessContract vote;
+        const auto owner = parseAddressField(value, "owner_address");
+        vote.set_owner_address(owner.data(), owner.size());
+        vote.set_support(optionalBool(value, "support"));
+        const auto& votesJSON = requireField(value, "votes");
+        if (!votesJSON.is_array()) {
+            throw std::invalid_argument("Expected votes array");
+        }
+        for (const auto& voteJSON : votesJSON) {
+            auto* nextVote = vote.add_votes();
+            const auto voteAddress = parseAddressField(voteJSON, "vote_address");
+            nextVote->set_vote_address(voteAddress.data(), voteAddress.size());
+            nextVote->set_vote_count(requireInt64(voteJSON, "vote_count"));
+        }
+        any.PackFrom(vote);
+        break;
+    }
+    case protocol::Transaction::Contract::WithdrawBalanceContract: {
+        protocol::WithdrawBalanceContract withdraw;
+        const auto owner = parseAddressField(value, "owner_address");
+        withdraw.set_owner_address(owner.data(), owner.size());
+        any.PackFrom(withdraw);
+        break;
+    }
+    case protocol::Transaction::Contract::UnfreezeAssetContract: {
+        protocol::UnfreezeAssetContract unfreeze;
+        const auto owner = parseAddressField(value, "owner_address");
+        unfreeze.set_owner_address(owner.data(), owner.size());
+        any.PackFrom(unfreeze);
+        break;
+    }
+    case protocol::Transaction::Contract::TriggerSmartContract: {
+        protocol::TriggerSmartContract trigger;
+        const auto owner = parseAddressField(value, "owner_address");
+        const auto contractAddress = parseAddressField(value, "contract_address");
+        trigger.set_owner_address(owner.data(), owner.size());
+        trigger.set_contract_address(contractAddress.data(), contractAddress.size());
+        if (value.contains("call_value")) {
+            trigger.set_call_value(requireInt64(value, "call_value"));
+        }
+        if (value.contains("data")) {
+            const auto data = parseHexField(value, "data");
+            trigger.set_data(data.data(), data.size());
+        }
+        if (value.contains("call_token_value")) {
+            trigger.set_call_token_value(requireInt64(value, "call_token_value"));
+        }
+        if (value.contains("token_id")) {
+            trigger.set_token_id(requireInt64(value, "token_id"));
+        }
+        any.PackFrom(trigger);
+        break;
+    }
+    case protocol::Transaction::Contract::AccountCreateContract:
+    default:
+        throw std::invalid_argument(std::string("Unsupported contract type: ") + contractTypeName);
+    }
+
+    *contract.mutable_parameter() = any;
+    return contract;
+}
+
+Data serializeRawDataJSON(const json& rawDataJSON) {
+    if (!rawDataJSON.is_object()) {
+        throw std::invalid_argument("Expected raw_data object");
+    }
+
+    protocol::Transaction::raw raw;
+    const auto refBlockBytes = parseHexField(rawDataJSON, "ref_block_bytes");
+    const auto refBlockHash = parseHexField(rawDataJSON, "ref_block_hash");
+    raw.set_ref_block_bytes(refBlockBytes.data(), refBlockBytes.size());
+    raw.set_ref_block_hash(refBlockHash.data(), refBlockHash.size());
+    raw.set_expiration(requireInt64(rawDataJSON, "expiration"));
+    raw.set_timestamp(requireInt64(rawDataJSON, "timestamp"));
+
+    if (rawDataJSON.contains("ref_block_num")) {
+        raw.set_ref_block_num(requireInt64(rawDataJSON, "ref_block_num"));
+    }
+    if (rawDataJSON.contains("fee_limit")) {
+        raw.set_fee_limit(requireInt64(rawDataJSON, "fee_limit"));
+    }
+    if (rawDataJSON.contains("data")) {
+        const auto memo = parseHexField(rawDataJSON, "data");
+        raw.set_data(memo.data(), memo.size());
+    }
+
+    const auto& contracts = requireField(rawDataJSON, "contract");
+    if (!contracts.is_array() || contracts.empty()) {
+        throw std::invalid_argument("Expected non-empty raw_data.contract array");
+    }
+    for (const auto& contractJSON : contracts) {
+        *raw.add_contract() = parseContract(contractJSON);
+    }
+
+    const auto serialized = raw.SerializeAsString();
+    return Data(serialized.begin(), serialized.end());
+}
+
+bool ensureTransactionHashes(json& parsed, std::string& errorMessage) {
+    if (parsed.contains("raw_data") && parsed["raw_data"].is_object()) {
+        const auto rawData = serializeRawDataJSON(parsed["raw_data"]);
+        parsed["raw_data_hex"] = hex(rawData);
+        if (!parsed.contains("txID") || !parsed["txID"].is_string()) {
+            parsed["txID"] = hex(Hash::sha256(rawData));
+        }
+        return true;
+    }
+
+    if (parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
+        if (!parsed.contains("txID") || !parsed["txID"].is_string()) {
+            parsed["txID"] = hex(Hash::sha256(parse_hex(stripHexPrefix(parsed["raw_data_hex"].get<std::string>()))));
+        }
+        return true;
+    }
+
+    if (parsed.contains("txID") && parsed["txID"].is_string()) {
+        return true;
+    }
+
+    errorMessage = "No txID, raw_data_hex, or raw_data found in raw JSON";
+    return false;
+}
+
+} // namespace
 
 /// Converts an external TransferContract to an internal one used for signing.
 protocol::TransferContract to_internal(const Proto::TransferContract& transfer) {
@@ -418,19 +749,15 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
         hash = parse_hex(input.txid());
     } else if (!input.raw_json().empty()) {
         try {
-            auto parsed = nlohmann::json::parse(input.raw_json());
-            if (parsed.contains("txID") && parsed["txID"].is_string()) {
-                hash = parse_hex(parsed["txID"].get<std::string>());
-            } else if (parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
-                // Compute txID = SHA256(raw_data) when dApp omits txID
-                hash = Hash::sha256(parse_hex(parsed["raw_data_hex"].get<std::string>()));
-            } else {
+            auto parsed = json::parse(input.raw_json());
+            std::string errorMessage;
+            if (!ensureTransactionHashes(parsed, errorMessage)) {
                 output.set_error(Common::Proto::Error_invalid_params);
-                output.set_error_message("No txID or raw_data_hex found in raw JSON");
+                output.set_error_message(errorMessage);
                 return output;
             }
+            hash = parse_hex(stripHexPrefix(parsed["txID"].get<std::string>()));
         } catch (const std::exception& e) {
-            // If parsing fails, return an error
             output.set_error(Common::Proto::Error_invalid_params);
             output.set_error_message(e.what());
             return output;
@@ -444,14 +771,14 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
     // Produce signed JSON: inject signature array into the original transaction
     if (!input.raw_json().empty()) {
         try {
-            auto parsed = nlohmann::json::parse(input.raw_json());
-            parsed["signature"] = nlohmann::json::array({hex(signature)});
-            // Ensure txID is present in the output JSON
-            if (!parsed.contains("txID") || !parsed["txID"].is_string()) {
+            auto parsed = json::parse(input.raw_json());
+            std::string errorMessage;
+            if (ensureTransactionHashes(parsed, errorMessage)) {
+                parsed["signature"] = json::array({hex(signature)});
                 parsed["txID"] = hex(hash);
+                auto jsonString = parsed.dump();
+                output.set_json(jsonString.data(), jsonString.size());
             }
-            auto json = parsed.dump();
-            output.set_json(json.data(), json.size());
         } catch (...) {
             // Best effort — signature is still in the output
         }
@@ -502,18 +829,19 @@ Proto::SigningOutput Signer::sign(const Proto::SigningInput& input) {
 Proto::SigningOutput Signer::compile(const Data& signature) const {
     Proto::SigningOutput output;
     if (!input.raw_json().empty()) {
-        // If raw JSON is provided, we use it directly
         try {
-            auto parsed = nlohmann::json::parse(input.raw_json());
-            // Add signature to JSON and set to output
-            parsed["signature"] = nlohmann::json::array({hex(signature)});
+            auto parsed = json::parse(input.raw_json());
+            std::string errorMessage;
+            if (!ensureTransactionHashes(parsed, errorMessage)) {
+                output.set_error(Common::Proto::Error_invalid_params);
+                output.set_error_message(errorMessage);
+                return output;
+            }
+            parsed["signature"] = json::array({hex(signature)});
             output.set_json(parsed.dump());
             output.set_signature(signature.data(), signature.size());
-            // Extract txID and set to output
-            if (parsed.contains("txID") && parsed["txID"].is_string()) {
-                auto txID = parse_hex(parsed["txID"].get<std::string>());
-                output.set_id(txID.data(), txID.size());
-            }
+            auto txID = parse_hex(stripHexPrefix(parsed["txID"].get<std::string>()));
+            output.set_id(txID.data(), txID.size());
             return output;
         } catch (const std::exception& e) {
             output.set_error(Common::Proto::Error_invalid_params);
@@ -535,16 +863,15 @@ Proto::SigningOutput Signer::compile(const Data& signature) const {
 
 Data Signer::signaturePreimage() const {
     if (!input.raw_json().empty()) {
-        // If raw JSON is provided, we use raw_data_hex directly
         try {
-            auto parsed = nlohmann::json::parse(input.raw_json());
-            if (parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
-                return parse_hex(parsed["raw_data_hex"].get<std::string>());
+            auto parsed = json::parse(input.raw_json());
+            std::string errorMessage;
+            if (ensureTransactionHashes(parsed, errorMessage) &&
+                parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
+                return parse_hex(stripHexPrefix(parsed["raw_data_hex"].get<std::string>()));
             }
-            // If raw_data_hex is not present, return an empty Data
             return {};
         } catch (...) {
-            // Ignore parsing errors, return an empty Data
             return {};
         }
     }
@@ -553,16 +880,15 @@ Data Signer::signaturePreimage() const {
 
 Data Signer::signaturePreimageHash() const {
     if (!input.raw_json().empty()) {
-        // If raw JSON is provided, we use txID directly
         try {
-            auto parsed = nlohmann::json::parse(input.raw_json());
-            if (parsed.contains("txID") && parsed["txID"].is_string()) {
-                return parse_hex(parsed["txID"].get<std::string>());
+            auto parsed = json::parse(input.raw_json());
+            std::string errorMessage;
+            if (ensureTransactionHashes(parsed, errorMessage) &&
+                parsed.contains("txID") && parsed["txID"].is_string()) {
+                return parse_hex(stripHexPrefix(parsed["txID"].get<std::string>()));
             }
-            // If txID is not present, return an empty Data
             return {};
         } catch (...) {
-            // Ignore parsing errors, return an empty Data
             return {};
         }
     }
