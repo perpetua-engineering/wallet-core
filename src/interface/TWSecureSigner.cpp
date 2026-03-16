@@ -523,6 +523,12 @@ TWData* _Nonnull TWSecureSignerSignBitcoin(
 
     input.add_private_key(privateKey.bytes.data(), privateKey.bytes.size());
 
+    // Also inject into signing_v2 for PSBT / V2 signing path
+    if (input.has_signing_v2()) {
+        input.mutable_signing_v2()->add_private_keys(
+            privateKey.bytes.data(), privateKey.bytes.size());
+    }
+
     // Sign
     Data inputData(input.ByteSizeLong());
     input.SerializeToArray(inputData.data(), (int)inputData.size());
@@ -532,6 +538,9 @@ TWData* _Nonnull TWSecureSignerSignBitcoin(
 
     // Clear private key from protobuf
     input.clear_private_key();
+    if (input.has_signing_v2()) {
+        input.mutable_signing_v2()->clear_private_keys();
+    }
 
     return TWDataCreateWithBytes(outputData.data(), outputData.size());
 }
