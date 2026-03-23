@@ -1,7 +1,7 @@
 #
 # Default settings
 #
-if (NOT FLUTTER)
+if (NOT FLUTTER AND NOT ANDROID)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 endif ()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
