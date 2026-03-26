@@ -72,6 +72,11 @@ endif()
 
 target_compile_options(TrezorCrypto PRIVATE ${TW_WARNING_FLAGS} -Werror PUBLIC -Wno-deprecated-volatile)
 
+# Clang 17+ (Xcode 26) errors on intentionally unterminated string initializers
+# in chacha_merged.c ("expand 32-byte k" → char[16], null dropped by design).
+set_source_files_properties(crypto/chacha20poly1305/chacha_merged.c PROPERTIES
+    COMPILE_FLAGS "-Wno-unterminated-string-initialization")
+
 target_include_directories(TrezorCrypto
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
