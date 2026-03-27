@@ -72,10 +72,16 @@ endif()
 
 target_compile_options(TrezorCrypto PRIVATE ${TW_WARNING_FLAGS} -Werror PUBLIC -Wno-deprecated-volatile)
 
-# Clang 17+ (Xcode 26) errors on intentionally unterminated string initializers
+# Some Clang versions error on intentionally unterminated string initializers
 # in chacha_merged.c ("expand 32-byte k" → char[16], null dropped by design).
-set_source_files_properties(crypto/chacha20poly1305/chacha_merged.c PROPERTIES
-    COMPILE_FLAGS "-Wno-unterminated-string-initialization")
+# Only apply the suppression flag if the compiler supports it (Apple Clang has
+# it, but the Android NDK's LLVM Clang 18 does not).
+include(CheckCCompilerFlag)
+check_c_compiler_flag("-Wno-unterminated-string-initialization" HAS_WNO_UNTERMINATED_STRING_INIT)
+if(HAS_WNO_UNTERMINATED_STRING_INIT)
+    set_source_files_properties(crypto/chacha20poly1305/chacha_merged.c PROPERTIES
+        COMPILE_FLAGS "-Wno-unterminated-string-initialization")
+endif()
 
 target_include_directories(TrezorCrypto
     PUBLIC
