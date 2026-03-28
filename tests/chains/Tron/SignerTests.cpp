@@ -27,6 +27,18 @@ TEST(TronSigner, SignDirectTransferAsset) {
     ASSERT_EQ(hex(output.signature()), "77f5eabde31e739d34a66914540f1756981dc7d782c9656f5e14e53b59a15371603a183aa12124adeee7991bf55acc8e488a6ca04fb393b1a8ac16610eeafdfc00");
 }
 
+TEST(TronSigner, SignDirectTransferAssetWithUppercaseHexPrefix) {
+    auto input = Proto::SigningInput();
+    const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
+    input.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    input.set_txid("0X546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb");
+
+    const auto output = Signer::sign(input);
+
+    ASSERT_EQ(hex(output.id()), "546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb");
+    ASSERT_EQ(hex(output.signature()), "77f5eabde31e739d34a66914540f1756981dc7d782c9656f5e14e53b59a15371603a183aa12124adeee7991bf55acc8e488a6ca04fb393b1a8ac16610eeafdfc00");
+}
+
 TEST(TronSigner, SignDirectRawJsonTransferAsset) {
     auto input = Proto::SigningInput();
     const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
@@ -264,7 +276,7 @@ TEST(TronSigner, SignDirectRawJsonTriggerSmartContractWithoutTxIdOrRawDataHex) {
                     "type_url": "type.googleapis.com/protocol.TriggerSmartContract",
                     "value": {
                         "contract_address": "41521ea197907927725ef36d70f25f850d1659c7c7",
-                        "data": "a9059cbb000000000000000000000041dbd7c53729b3310e1843083000fa84abad99696100000000000000000000000000000000000000000000000000000000000003e8",
+                        "data": "a9059cbb000000000000000000000000dbd7c53729b3310e1843083000fa84abad99696100000000000000000000000000000000000000000000000000000000000003e8",
                         "owner_address": "415cd0fb0ab3ce40f3051414c604b27756e69e43db"
                     }
                 },
@@ -281,8 +293,8 @@ TEST(TronSigner, SignDirectRawJsonTriggerSmartContractWithoutTxIdOrRawDataHex) {
 
     const auto output = Signer::sign(input);
 
-    ASSERT_EQ(hex(output.id()), "0d644290e3cf554f6219c7747f5287589b6e7e30e1b02793b48ba362da6a5058");
-    ASSERT_EQ(hex(output.signature()), "bec790877b3a008640781e3948b070740b1f6023c29ecb3f7b5835433c13fc5835e5cad3bd44360ff2ddad5ed7dc9d7dee6878f90e86a40355b7697f5954b88c01");
+    ASSERT_EQ(hex(output.id()), "9998912c827b1c69b26c26894dde1ba4b29e393e5c71d7686002cf02cdd6fe3b");
+    ASSERT_EQ(hex(output.signature()), "2c2ba736b8f89b8d0d2d3ef2ed8a2ade0993cd946554cc43e9aef6d0b23ac3603839741d375a6683a7b4896f65a655a97d4fda8ea9ba4f6f0951d33dec521b8801");
 }
 
 TEST(TronSigner, SignDirectRawJsonWithOnlyTxIdFailsClosed) {
@@ -848,8 +860,8 @@ TEST(TronSigner, SignTransferTrc20Contract) {
 
     const auto output = Signer::sign(input);
 
-    ASSERT_EQ(hex(output.id()), "0d644290e3cf554f6219c7747f5287589b6e7e30e1b02793b48ba362da6a5058");
-    ASSERT_EQ(hex(output.signature()), "bec790877b3a008640781e3948b070740b1f6023c29ecb3f7b5835433c13fc5835e5cad3bd44360ff2ddad5ed7dc9d7dee6878f90e86a40355b7697f5954b88c01");
+    ASSERT_EQ(hex(output.id()), "9998912c827b1c69b26c26894dde1ba4b29e393e5c71d7686002cf02cdd6fe3b");
+    ASSERT_EQ(hex(output.signature()), "2c2ba736b8f89b8d0d2d3ef2ed8a2ade0993cd946554cc43e9aef6d0b23ac3603839741d375a6683a7b4896f65a655a97d4fda8ea9ba4f6f0951d33dec521b8801");
 }
 
 } // namespace TW::Tron

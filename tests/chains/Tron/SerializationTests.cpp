@@ -171,7 +171,7 @@ namespace TW::Tron {
 
         const auto output = Signer::sign(input);
 
-        ASSERT_EQ(output.json(), R"({"raw_data":{"contract":[{"parameter":{"type_url":"type.googleapis.com/protocol.TriggerSmartContract","value":{"contract_address":"41521ea197907927725ef36d70f25f850d1659c7c7","data":"a9059cbb000000000000000000000041dbd7c53729b3310e1843083000fa84abad99696100000000000000000000000000000000000000000000000000000000000003e8","owner_address":"415cd0fb0ab3ce40f3051414c604b27756e69e43db"}},"type":"TriggerSmartContract"}],"expiration":1539331479000,"ref_block_bytes":"7b3b","ref_block_hash":"b21ace8d6ac20e7e","timestamp":1539295479000},"signature":["bec790877b3a008640781e3948b070740b1f6023c29ecb3f7b5835433c13fc5835e5cad3bd44360ff2ddad5ed7dc9d7dee6878f90e86a40355b7697f5954b88c01"],"txID":"0d644290e3cf554f6219c7747f5287589b6e7e30e1b02793b48ba362da6a5058"})");
+        ASSERT_EQ(output.json(), R"({"raw_data":{"contract":[{"parameter":{"type_url":"type.googleapis.com/protocol.TriggerSmartContract","value":{"contract_address":"41521ea197907927725ef36d70f25f850d1659c7c7","data":"a9059cbb000000000000000000000000dbd7c53729b3310e1843083000fa84abad99696100000000000000000000000000000000000000000000000000000000000003e8","owner_address":"415cd0fb0ab3ce40f3051414c604b27756e69e43db"}},"type":"TriggerSmartContract"}],"expiration":1539331479000,"ref_block_bytes":"7b3b","ref_block_hash":"b21ace8d6ac20e7e","timestamp":1539295479000},"signature":["2c2ba736b8f89b8d0d2d3ef2ed8a2ade0993cd946554cc43e9aef6d0b23ac3603839741d375a6683a7b4896f65a655a97d4fda8ea9ba4f6f0951d33dec521b8801"],"txID":"9998912c827b1c69b26c26894dde1ba4b29e393e5c71d7686002cf02cdd6fe3b"})");
     }
 
     TEST(TronSerialization, SignTransferTrc20Contract_LargeAmount) {

@@ -59,7 +59,7 @@ class TestTronTransactionSigner {
 
         val output = AnySigner.sign(signingInput.build(), TRON, Tron.SigningOutput.parser())
 
-        assertEquals(Numeric.toHexString(output.id.toByteArray()), "0x0d644290e3cf554f6219c7747f5287589b6e7e30e1b02793b48ba362da6a5058")
-        assertEquals(Numeric.toHexString(output.signature.toByteArray()), "0xbec790877b3a008640781e3948b070740b1f6023c29ecb3f7b5835433c13fc5835e5cad3bd44360ff2ddad5ed7dc9d7dee6878f90e86a40355b7697f5954b88c01")
+        assertEquals(Numeric.toHexString(output.id.toByteArray()), "0x9998912c827b1c69b26c26894dde1ba4b29e393e5c71d7686002cf02cdd6fe3b")
+        assertEquals(Numeric.toHexString(output.signature.toByteArray()), "0x2c2ba736b8f89b8d0d2d3ef2ed8a2ade0993cd946554cc43e9aef6d0b23ac3603839741d375a6683a7b4896f65a655a97d4fda8ea9ba4f6f0951d33dec521b8801")
     }
 }

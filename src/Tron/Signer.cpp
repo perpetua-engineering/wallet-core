@@ -34,7 +34,7 @@ std::string stripHexPrefix(std::string value) {
 
 bool parseHexString(const std::string& value, const char* fieldName, Data& bytes, std::string& errorMessage, size_t expectedSize = 0) {
     const auto normalized = stripHexPrefix(value);
-    if (normalized.empty() || !is_hex_encoded(value)) {
+    if (normalized.empty() || !is_hex_encoded(normalized)) {
         errorMessage = std::string("Invalid hex for field: ") + fieldName;
         return false;
     }
