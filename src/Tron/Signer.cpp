@@ -23,11 +23,34 @@ using json = nlohmann::json;
 
 namespace {
 
+constexpr size_t kTransactionHashSize = 32;
+
 std::string stripHexPrefix(std::string value) {
     if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0) {
         return value.substr(2);
     }
     return value;
+}
+
+bool parseHexString(const std::string& value, const char* fieldName, Data& bytes, std::string& errorMessage, size_t expectedSize = 0) {
+    const auto normalized = stripHexPrefix(value);
+    if (normalized.empty() || !is_hex_encoded(value)) {
+        errorMessage = std::string("Invalid hex for field: ") + fieldName;
+        return false;
+    }
+
+    bytes = parse_hex(normalized);
+    if (bytes.empty()) {
+        errorMessage = std::string("Invalid hex for field: ") + fieldName;
+        return false;
+    }
+
+    if (expectedSize != 0 && bytes.size() != expectedSize) {
+        errorMessage = std::string("Invalid length for field: ") + fieldName;
+        return false;
+    }
+
+    return true;
 }
 
 const json& requireField(const json& object, const char* key) {
@@ -337,26 +360,68 @@ json& findTransactionObject(json& parsed) {
 }
 
 bool ensureTransactionHashes(json& parsed, std::string& errorMessage) {
-    if (parsed.contains("raw_data_hex") && parsed["raw_data_hex"].is_string()) {
-        if (!parsed.contains("txID") || !parsed["txID"].is_string()) {
-            parsed["txID"] = hex(Hash::sha256(parse_hex(stripHexPrefix(parsed["raw_data_hex"].get<std::string>()))));
+    Data rawDataFromHex;
+    Data rawDataFromJSON;
+    bool hasRawDataHex = false;
+    bool hasRawDataJSON = false;
+
+    if (parsed.contains("raw_data_hex")) {
+        if (!parsed["raw_data_hex"].is_string()) {
+            errorMessage = "Expected string for field: raw_data_hex";
+            return false;
         }
-        return true;
+        if (!parseHexString(parsed["raw_data_hex"].get<std::string>(), "raw_data_hex", rawDataFromHex, errorMessage)) {
+            return false;
+        }
+        hasRawDataHex = true;
     }
 
-    if (parsed.contains("txID") && parsed["txID"].is_string()) {
-        return true;
+    if (parsed.contains("raw_data")) {
+        if (!parsed["raw_data"].is_object()) {
+            errorMessage = "Expected object for field: raw_data";
+            return false;
+        }
+        rawDataFromJSON = serializeRawDataJSON(parsed["raw_data"]);
+        hasRawDataJSON = true;
     }
 
-    if (parsed.contains("raw_data") && parsed["raw_data"].is_object()) {
-        const auto rawData = serializeRawDataJSON(parsed["raw_data"]);
-        parsed["raw_data_hex"] = hex(rawData);
-        parsed["txID"] = hex(Hash::sha256(rawData));
-        return true;
+    if (!hasRawDataHex && !hasRawDataJSON) {
+        if (parsed.contains("txID") && parsed["txID"].is_string()) {
+            errorMessage = "raw_json signing requires raw_data_hex or raw_data; use txid for explicit digest signing";
+        } else {
+            errorMessage = "No txID, raw_data_hex, or raw_data found in raw JSON";
+        }
+        return false;
     }
 
-    errorMessage = "No txID, raw_data_hex, or raw_data found in raw JSON";
-    return false;
+    if (hasRawDataHex && hasRawDataJSON && rawDataFromHex != rawDataFromJSON) {
+        errorMessage = "raw_data_hex does not match canonical raw_data serialization";
+        return false;
+    }
+
+    const auto& rawData = hasRawDataHex ? rawDataFromHex : rawDataFromJSON;
+    const auto computedTxID = Hash::sha256(rawData);
+
+    if (parsed.contains("txID")) {
+        if (!parsed["txID"].is_string()) {
+            errorMessage = "Expected string for field: txID";
+            return false;
+        }
+
+        Data providedTxID;
+        if (!parseHexString(parsed["txID"].get<std::string>(), "txID", providedTxID, errorMessage, kTransactionHashSize)) {
+            return false;
+        }
+
+        if (providedTxID != computedTxID) {
+            errorMessage = "Provided txID does not match recomputed transaction hash";
+            return false;
+        }
+    }
+
+    parsed["raw_data_hex"] = hex(rawData);
+    parsed["txID"] = hex(computedTxID);
+    return true;
 }
 
 } // namespace
@@ -757,7 +822,12 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
 
     Data hash;
     if (!input.txid().empty()) {
-        hash = parse_hex(input.txid());
+        std::string errorMessage;
+        if (!parseHexString(input.txid(), "txid", hash, errorMessage, kTransactionHashSize)) {
+            output.set_error(Common::Proto::Error_invalid_params);
+            output.set_error_message(errorMessage);
+            return output;
+        }
     } else if (!input.raw_json().empty()) {
         try {
             auto parsed = json::parse(input.raw_json());

@@ -11,8 +11,11 @@
 #include "Tron/Signer.h"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 namespace TW::Tron {
+
+using json = nlohmann::json;
 
 TEST(TronSigner, SignDirectTransferAsset) {
     auto input = Proto::SigningInput();
@@ -56,6 +59,84 @@ TEST(TronSigner, SignDirectRawJsonTransferAsset) {
     ASSERT_EQ(hex(output.signature()), "77f5eabde31e739d34a66914540f1756981dc7d782c9656f5e14e53b59a15371603a183aa12124adeee7991bf55acc8e488a6ca04fb393b1a8ac16610eeafdfc00");
 }
 
+TEST(TronSigner, SignDirectRawJsonRejectsMismatchedTxId) {
+    auto input = Proto::SigningInput();
+    const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
+    input.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    auto rawJson = R"({
+	"raw_data": {
+		"contract": [{
+			"parameter": {
+				"type_url": "type.googleapis.com/protocol.TransferAssetContract",
+				"value": {
+					"amount": 4,
+					"asset_name": "31303030393539",
+					"owner_address": "415cd0fb0ab3ce40f3051414c604b27756e69e43db",
+					"to_address": "41521ea197907927725ef36d70f25f850d1659c7c7"
+				}
+			},
+			"type": "TransferAssetContract"
+		}],
+		"expiration": 1541926116000,
+		"ref_block_bytes": "b801",
+		"ref_block_hash": "0e2bc08d550f5f58",
+		"timestamp": 1539295479000
+	},
+	"visible":false,
+	"txID": "0000000000000000000000000000000000000000000000000000000000000000"
+})";
+    input.set_raw_json(rawJson);
+
+    const auto output = Signer::sign(input);
+
+    ASSERT_EQ(output.error(), Common::Proto::Error_invalid_params);
+    ASSERT_EQ(output.error_message(), "Provided txID does not match recomputed transaction hash");
+}
+
+TEST(TronSigner, SignDirectRawJsonWrappedTransactionPreservesWrapper) {
+    auto input = Proto::SigningInput();
+    const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
+    input.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    auto rawJson = R"({
+        "transaction": {
+            "raw_data": {
+                "contract": [{
+                    "parameter": {
+                        "type_url": "type.googleapis.com/protocol.TransferAssetContract",
+                        "value": {
+                            "amount": 4,
+                            "asset_name": "31303030393539",
+                            "owner_address": "415cd0fb0ab3ce40f3051414c604b27756e69e43db",
+                            "to_address": "41521ea197907927725ef36d70f25f850d1659c7c7"
+                        }
+                    },
+                    "type": "TransferAssetContract"
+                }],
+                "expiration": 1541926116000,
+                "ref_block_bytes": "b801",
+                "ref_block_hash": "0e2bc08d550f5f58",
+                "timestamp": 1539295479000
+            },
+            "visible": false,
+            "txID": "546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb"
+        }
+    })";
+    input.set_raw_json(rawJson);
+
+    const auto output = Signer::sign(input);
+
+    ASSERT_EQ(hex(output.id()), "546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb");
+    ASSERT_EQ(hex(output.signature()), "77f5eabde31e739d34a66914540f1756981dc7d782c9656f5e14e53b59a15371603a183aa12124adeee7991bf55acc8e488a6ca04fb393b1a8ac16610eeafdfc00");
+
+    const auto signedJSON = json::parse(output.json());
+    ASSERT_TRUE(signedJSON.contains("transaction"));
+    ASSERT_TRUE(signedJSON["transaction"].contains("signature"));
+    ASSERT_EQ(
+        signedJSON["transaction"]["txID"].get<std::string>(),
+        "546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb"
+    );
+}
+
 TEST(TronSigner, SignDirectRawJsonTransferWithoutTxIdOrRawDataHex) {
     auto input = Proto::SigningInput();
     const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
@@ -86,6 +167,90 @@ TEST(TronSigner, SignDirectRawJsonTransferWithoutTxIdOrRawDataHex) {
 
     ASSERT_EQ(hex(output.id()), "dc6f6d9325ee44ab3c00528472be16e1572ab076aa161ccd12515029869d0451");
     ASSERT_EQ(hex(output.signature()), "ede769f6df28aefe6a846be169958c155e23e7e5c9621d2e8dce1719b4d952b63e8a8bf9f00e41204ac1bf69b1a663dacdf764367e48e4a5afcd6b055a747fb200");
+}
+
+TEST(TronSigner, SignDirectRawJsonRawDataHexMatchesCanonicalRawData) {
+    auto canonicalInput = Proto::SigningInput();
+    const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
+    canonicalInput.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    auto canonicalRawJson = R"({
+        "raw_data": {
+            "contract": [{
+                "parameter": {
+                    "type_url": "type.googleapis.com/protocol.TransferContract",
+                    "value": {
+                        "amount": 2000000,
+                        "owner_address": "415cd0fb0ab3ce40f3051414c604b27756e69e43db",
+                        "to_address": "41521ea197907927725ef36d70f25f850d1659c7c7"
+                    }
+                },
+                "type": "TransferContract"
+            }],
+            "expiration": 1539331479000,
+            "ref_block_bytes": "7b3b",
+            "ref_block_hash": "b21ace8d6ac20e7e",
+            "timestamp": 1539295479000
+        },
+        "visible": false
+    })";
+    canonicalInput.set_raw_json(canonicalRawJson);
+
+    const auto canonicalOutput = Signer::sign(canonicalInput);
+    const auto rawDataHex = hex(Signer(canonicalInput).signaturePreimage());
+
+    auto hexOnlyInput = Proto::SigningInput();
+    hexOnlyInput.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    auto rawHexJSON = json::object();
+    rawHexJSON["raw_data_hex"] = rawDataHex;
+    rawHexJSON["visible"] = false;
+    hexOnlyInput.set_raw_json(rawHexJSON.dump());
+
+    const auto hexOnlyOutput = Signer::sign(hexOnlyInput);
+
+    ASSERT_EQ(hex(hexOnlyOutput.id()), hex(canonicalOutput.id()));
+    ASSERT_EQ(hex(hexOnlyOutput.signature()), hex(canonicalOutput.signature()));
+}
+
+TEST(TronSigner, SignDirectRawJsonRejectsMismatchedRawDataHexAndRawData) {
+    auto canonicalInput = Proto::SigningInput();
+    const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
+    canonicalInput.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    auto canonicalRawJson = R"({
+        "raw_data": {
+            "contract": [{
+                "parameter": {
+                    "type_url": "type.googleapis.com/protocol.TransferContract",
+                    "value": {
+                        "amount": 2000000,
+                        "owner_address": "415cd0fb0ab3ce40f3051414c604b27756e69e43db",
+                        "to_address": "41521ea197907927725ef36d70f25f850d1659c7c7"
+                    }
+                },
+                "type": "TransferContract"
+            }],
+            "expiration": 1539331479000,
+            "ref_block_bytes": "7b3b",
+            "ref_block_hash": "b21ace8d6ac20e7e",
+            "timestamp": 1539295479000
+        },
+        "visible": false
+    })";
+    canonicalInput.set_raw_json(canonicalRawJson);
+
+    auto rawDataHex = hex(Signer(canonicalInput).signaturePreimage());
+    rawDataHex[0] = rawDataHex[0] == '0' ? '1' : '0';
+    auto mismatchedJSON = json::parse(canonicalRawJson);
+    mismatchedJSON["raw_data_hex"] = rawDataHex;
+    mismatchedJSON["visible"] = false;
+
+    auto mismatchedInput = Proto::SigningInput();
+    mismatchedInput.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    mismatchedInput.set_raw_json(mismatchedJSON.dump());
+
+    const auto output = Signer::sign(mismatchedInput);
+
+    ASSERT_EQ(output.error(), Common::Proto::Error_invalid_params);
+    ASSERT_EQ(output.error_message(), "raw_data_hex does not match canonical raw_data serialization");
 }
 
 TEST(TronSigner, SignDirectRawJsonTriggerSmartContractWithoutTxIdOrRawDataHex) {
@@ -120,7 +285,19 @@ TEST(TronSigner, SignDirectRawJsonTriggerSmartContractWithoutTxIdOrRawDataHex) {
     ASSERT_EQ(hex(output.signature()), "bec790877b3a008640781e3948b070740b1f6023c29ecb3f7b5835433c13fc5835e5cad3bd44360ff2ddad5ed7dc9d7dee6878f90e86a40355b7697f5954b88c01");
 }
 
-TEST(TronSigner, SignDirectRawJsonWithTxIdSkipsUnsupportedRawDataNormalization) {
+TEST(TronSigner, SignDirectRawJsonWithOnlyTxIdFailsClosed) {
+    auto input = Proto::SigningInput();
+    const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
+    input.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
+    input.set_raw_json(R"({"txID":"546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb","visible":false})");
+
+    const auto output = Signer::sign(input);
+
+    ASSERT_EQ(output.error(), Common::Proto::Error_invalid_params);
+    ASSERT_EQ(output.error_message(), "raw_json signing requires raw_data_hex or raw_data; use txid for explicit digest signing");
+}
+
+TEST(TronSigner, SignDirectRawJsonRejectsUnsupportedRawDataEvenWithTxId) {
     auto input = Proto::SigningInput();
     const auto privateKey = PrivateKey(parse_hex("2d8f68944bdbfbc0769542fba8fc2d2a3de67393334471624364c7006da2aa54"));
     input.set_private_key(privateKey.bytes.data(), privateKey.bytes.size());
@@ -146,8 +323,8 @@ TEST(TronSigner, SignDirectRawJsonWithTxIdSkipsUnsupportedRawDataNormalization) 
 
     const auto output = Signer::sign(input);
 
-    ASSERT_EQ(hex(output.id()), "546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb");
-    ASSERT_EQ(hex(output.signature()), "77f5eabde31e739d34a66914540f1756981dc7d782c9656f5e14e53b59a15371603a183aa12124adeee7991bf55acc8e488a6ca04fb393b1a8ac16610eeafdfc00");
+    ASSERT_EQ(output.error(), Common::Proto::Error_invalid_params);
+    ASSERT_EQ(output.error_message(), "Unsupported contract type: AccountCreateContract");
 }
 
 TEST(TronSigner, SignTransferAsset) {
