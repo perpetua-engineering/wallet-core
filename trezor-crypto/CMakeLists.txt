@@ -61,6 +61,16 @@ add_library(TrezorCrypto
     crypto/cardano.c
 )
 
+# Cryptograph's production Apple and Android artifacts require deterministic
+# ECDSA nonces. Do not rely on options.h's upstream default: an injected
+# -DUSE_RFC6979=0 must be rejected by the compile-time invariant in options.h.
+if (APPLE OR ANDROID)
+    target_compile_definitions(TrezorCrypto PRIVATE
+        CRYPTOGRAPH_REQUIRE_RFC6979=1
+        USE_RFC6979=1
+    )
+endif()
+
 if (EMSCRIPTEN)
     message(STATUS "Skip building trezor-crypto/tests")
     set(TW_WARNING_FLAGS ${TW_WARNING_FLAGS} -Wno-bitwise-instead-of-logical)

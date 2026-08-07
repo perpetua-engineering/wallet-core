@@ -23,7 +23,28 @@
 
 #include <TrezorCrypto/rand.h>
 
+// [cryptograph] Apple builds must not carry an RNG fallback here.
+//
+// On Apple platforms the one and only provider is swift/Sources/SecRandom.m,
+// which is backed by SecRandomCopyBytes. When this file also emitted weak
+// /dev/urandom definitions, dropping SecRandom.m from the build still produced
+// a linkable archive: the weak symbols silently satisfied random32 /
+// random_buffer and only a post-link verifier could catch the regression.
+//
+// Compiling no definitions at all on Apple makes that configuration
+// unrepresentable — omitting the provider is now an unresolved-symbol link
+// error instead of a runnable artifact. The guard lives in the source rather
+// than in CMake so a future source-list or target change cannot reintroduce
+// the fallback. Non-Apple platforms (Android and other native targets) keep
+// the fail-closed fallback below; see docs/audits/walletcore-2026-06-13.md.
+#if defined(__APPLE__)
+
+// Intentionally empty: see swift/Sources/SecRandom.m.
+
+#else
+
 #include <fcntl.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -32,15 +53,15 @@
 uint32_t __attribute__((weak)) random32(void) {
     int randomData = open("/dev/urandom", O_RDONLY);
     if (randomData < 0) {
-        return 0;
+        abort();  // Critical: cannot proceed without random source
     }
 
     uint32_t result;
-    if (read(randomData, &result, sizeof(result)) < 0) {
-        return 0;
-    }
-
+    ssize_t readLen = read(randomData, &result, sizeof(result));
     close(randomData);
+    if (readLen != sizeof(result)) {
+        abort();  // Critical: failed to read random data
+    }
 
     return result;
 }
@@ -48,10 +69,13 @@ uint32_t __attribute__((weak)) random32(void) {
 void __attribute__((weak)) random_buffer(uint8_t *buf, size_t len) {
     int randomData = open("/dev/urandom", O_RDONLY);
     if (randomData < 0) {
-        return;
+        abort();  // Critical: cannot proceed without random source
     }
-    if (read(randomData, buf, len) < 0) {
-        return;
-    }
+    ssize_t readLen = read(randomData, buf, len);
     close(randomData);
+    if (readLen != (ssize_t)len) {
+        abort();  // Critical: failed to read random data
+    }
 }
+
+#endif  // !__APPLE__

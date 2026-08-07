@@ -59,13 +59,20 @@ TWData* _Nullable TWSecureSignerCreateWallet(
     return nullptr;
 }
 TWData* _Nullable TWSecureSignerImportSeedPhrase(
-    TWString* _Nonnull, const void* _Nonnull, TWString* _Nonnull) {
+    TWString* _Nonnull, TWString* _Nonnull, const void* _Nonnull, TWString* _Nonnull) {
     return nullptr;
 }
 TWData* _Nullable TWSecureSignerImportRecovery(
     TWData* _Nonnull, TWData* _Nonnull, TWData* _Nonnull,
     uint32_t, uint8_t, TWString* _Nonnull,
     const uint8_t* _Nullable, size_t, TWString* _Nullable,
+    const void* _Nonnull, TWString* _Nonnull,
+    TWSecureSignerProgressCallback _Nullable, const void* _Nullable) {
+    return nullptr;
+}
+TWData* _Nullable TWSecureSignerImportRecoveryV2(
+    TWData* _Nonnull, TWData* _Nonnull, TWString* _Nonnull,
+    const uint8_t* _Nullable, size_t,
     const void* _Nonnull, TWString* _Nonnull,
     TWSecureSignerProgressCallback _Nullable, const void* _Nullable) {
     return nullptr;
@@ -103,6 +110,7 @@ extern "C" {
 }
 
 #include <Security/Security.h>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <array>
@@ -425,10 +433,44 @@ Data encryptMnemonic(const std::string& mnemonic, SecKeyRef seKey, const std::st
     return result;
 }
 
-// Derive private key from mnemonic and path
-std::optional<PrivateKey> deriveKey(const std::string& mnemonic, const std::string& path, TWCoinType coin) {
+struct WalletSecret {
+    std::string mnemonic;
+    std::string passphrase;
+};
+
+std::string makeWalletSecretEnvelope(const std::string& mnemonic, const std::string& passphrase) {
+    return std::string("CGWAL1\n") + mnemonic + "\n" + passphrase;
+}
+
+WalletSecret parseWalletSecret(std::string& plaintext) {
+    static const std::string prefix = "CGWAL1\n";
+    if (plaintext.rfind(prefix, 0) != 0) {
+        return WalletSecret{plaintext, ""};
+    }
+    const size_t bodyStart = prefix.size();
+    const size_t separator = plaintext.find('\n', bodyStart);
+    if (separator == std::string::npos) {
+        return WalletSecret{plaintext, ""};
+    }
+    return WalletSecret{
+        plaintext.substr(bodyStart, separator - bodyStart),
+        plaintext.substr(separator + 1)
+    };
+}
+
+void zeroWalletSecret(WalletSecret& secret) {
+    if (!secret.mnemonic.empty()) {
+        memzero(secret.mnemonic.data(), secret.mnemonic.size());
+    }
+    if (!secret.passphrase.empty()) {
+        memzero(secret.passphrase.data(), secret.passphrase.size());
+    }
+}
+
+// Derive private key from mnemonic/passphrase and path
+std::optional<PrivateKey> deriveKey(const WalletSecret& secret, const std::string& path, TWCoinType coin) {
     try {
-        HDWallet<> wallet(mnemonic, "");
+        HDWallet<> wallet(secret.mnemonic, secret.passphrase);
         DerivationPath derivationPath(path);
         return wallet.getKey(coin, derivationPath);
     } catch (...) {
@@ -454,14 +496,15 @@ TWData* _Nonnull TWSecureSignerSignEthereum(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWDataCreateWithSize(0);
     }
 
-    // Derive key
-    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeEthereum);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, TWCoinTypeEthereum);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWDataCreateWithSize(0);
     }
@@ -502,14 +545,15 @@ TWData* _Nonnull TWSecureSignerSignBitcoin(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWDataCreateWithSize(0);
     }
 
-    // Derive key
-    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeBitcoin);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, TWCoinTypeBitcoin);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWDataCreateWithSize(0);
     }
@@ -559,14 +603,15 @@ TWData* _Nonnull TWSecureSignerSignSolana(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWDataCreateWithSize(0);
     }
 
-    // Derive key
-    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeSolana);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, TWCoinTypeSolana);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWDataCreateWithSize(0);
     }
@@ -608,14 +653,15 @@ TWData* _Nonnull TWSecureSignerSignUtxo(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWDataCreateWithSize(0);
     }
 
-    // Derive key
-    auto privateKeyOpt = deriveKey(mnemonic, path, coin);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, coin);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWDataCreateWithSize(0);
     }
@@ -656,14 +702,15 @@ TWData* _Nonnull TWSecureSignerSignTron(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWDataCreateWithSize(0);
     }
 
-    // Derive key
-    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeTron);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, TWCoinTypeTron);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWDataCreateWithSize(0);
     }
@@ -704,14 +751,15 @@ TWData* _Nonnull TWSecureSignerSignXrp(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWDataCreateWithSize(0);
     }
 
-    // Derive key
-    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeXRP);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, TWCoinTypeXRP);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWDataCreateWithSize(0);
     }
@@ -757,14 +805,15 @@ TWData* _Nonnull TWSecureSignerSignDigest(
     }
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWDataCreateWithSize(0);
     }
 
-    // Derive key
-    auto privateKeyOpt = deriveKey(mnemonic, path, coin);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, coin);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWDataCreateWithSize(0);
     }
@@ -790,14 +839,15 @@ TWData* _Nonnull TWSecureSignerSignEd25519(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWDataCreateWithSize(0);
     }
 
-    // Derive key (Solana uses Ed25519)
-    auto privateKeyOpt = deriveKey(mnemonic, path, TWCoinTypeSolana);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, TWCoinTypeSolana);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWDataCreateWithSize(0);
     }
@@ -822,14 +872,15 @@ TWString* _Nonnull TWSecureSignerDeriveAddress(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return TWStringCreateWithUTF8Bytes("");
     }
 
-    // Derive key
-    auto privateKeyOpt = deriveKey(mnemonic, path, coinType);
-    memzero(mnemonic.data(), mnemonic.size());
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+    auto privateKeyOpt = deriveKey(secret, path, coinType);
+    zeroWalletSecret(secret);
     if (!privateKeyOpt) {
         return TWStringCreateWithUTF8Bytes("");
     }
@@ -851,22 +902,25 @@ TWData* _Nullable TWSecureSignerDeriveSeed(
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
     // Decrypt mnemonic
-    std::string mnemonic;
-    if (!decryptMnemonic(encrypted, seKey, salt, mnemonic)) {
+    std::string plaintext;
+    if (!decryptMnemonic(encrypted, seKey, salt, plaintext)) {
         return nullptr;
     }
 
+    WalletSecret secret = parseWalletSecret(plaintext);
+    memzero(plaintext.data(), plaintext.size());
+
     // Derive seed
     try {
-        HDWallet<> wallet(mnemonic, "");
-        memzero(mnemonic.data(), mnemonic.size());
+        HDWallet<> wallet(secret.mnemonic, secret.passphrase);
+        zeroWalletSecret(secret);
 
         const auto& seed = wallet.getSeed();
         TWData* result = TWDataCreateWithBytes(seed.data(), seed.size());
         // HDWallet destructor zeros seed and mnemonic internally
         return result;
     } catch (...) {
-        memzero(mnemonic.data(), mnemonic.size());
+        zeroWalletSecret(secret);
         return nullptr;
     }
 }
@@ -897,8 +951,11 @@ TWData* _Nullable TWSecureSignerCreateWallet(
             return nullptr;
         }
 
-        // SE-encrypt the mnemonic — Swift never sees plaintext
-        Data encrypted = encryptMnemonic(mnemonic, seKey, salt);
+        std::string envelope = makeWalletSecretEnvelope(mnemonic, "");
+
+        // SE-encrypt the wallet secret — Swift never sees plaintext
+        Data encrypted = encryptMnemonic(envelope, seKey, salt);
+        memzero(envelope.data(), envelope.size());
         memzero(mnemonic.data(), mnemonic.size());
 
         if (encrypted.empty()) {
@@ -914,10 +971,12 @@ TWData* _Nullable TWSecureSignerCreateWallet(
 
 TWData* _Nullable TWSecureSignerImportSeedPhrase(
     TWString* _Nonnull mnemonicStr,
+    TWString* _Nonnull passphraseStr,
     const void* _Nonnull seKeyRef,
     TWString* _Nonnull hkdfSalt
 ) {
     std::string mnemonic = *reinterpret_cast<const std::string*>(mnemonicStr);
+    std::string passphrase = *reinterpret_cast<const std::string*>(passphraseStr);
     const std::string& salt = *reinterpret_cast<const std::string*>(hkdfSalt);
     SecKeyRef seKey = (SecKeyRef)seKeyRef;
 
@@ -927,9 +986,15 @@ TWData* _Nullable TWSecureSignerImportSeedPhrase(
         return nullptr;
     }
 
-    // SE-encrypt the mnemonic — Swift never sees plaintext after this
-    Data encrypted = encryptMnemonic(mnemonic, seKey, salt);
+    std::string envelope = makeWalletSecretEnvelope(mnemonic, passphrase);
+
+    // SE-encrypt the wallet secret — Swift never sees plaintext after this
+    Data encrypted = encryptMnemonic(envelope, seKey, salt);
+    memzero(envelope.data(), envelope.size());
     memzero(mnemonic.data(), mnemonic.size());
+    if (!passphrase.empty()) {
+        memzero(passphrase.data(), passphrase.size());
+    }
 
     if (encrypted.empty()) {
         return nullptr;
@@ -1056,24 +1121,381 @@ TWData* _Nullable TWSecureSignerImportRecovery(
         return nullptr;  // Wrong PIN or corrupted data
     }
 
-    // Convert to string and validate as BIP-39 mnemonic
-    std::string mnemonic(plaintext.begin(), plaintext.end());
+    // Convert to string and validate as a legacy mnemonic or wallet-secret envelope.
+    std::string plaintextSecret(plaintext.begin(), plaintext.end());
     memzero(plaintext.data(), plaintext.size());
+    WalletSecret walletSecret = parseWalletSecret(plaintextSecret);
+    memzero(plaintextSecret.data(), plaintextSecret.size());
 
-    if (!Mnemonic::isValid(mnemonic)) {
-        memzero(mnemonic.data(), mnemonic.size());
+    if (!Mnemonic::isValid(walletSecret.mnemonic)) {
+        zeroWalletSecret(walletSecret);
         return nullptr;  // Decrypted but not a valid mnemonic
     }
 
-    // SE-encrypt the mnemonic — Swift never sees plaintext
-    Data encrypted = encryptMnemonic(mnemonic, seKey, hkdfSalt);
-    memzero(mnemonic.data(), mnemonic.size());
+    std::string envelope = makeWalletSecretEnvelope(walletSecret.mnemonic, walletSecret.passphrase);
+    Data encrypted = encryptMnemonic(envelope, seKey, hkdfSalt);
+    memzero(envelope.data(), envelope.size());
+    zeroWalletSecret(walletSecret);
 
     if (encrypted.empty()) {
         return nullptr;
     }
 
     return TWDataCreateWithBytes(encrypted.data(), encrypted.size());
+}
+
+// MARK: - CGREC2 unified envelope import
+
+namespace {
+
+/// Minimal in-place CBOR reader for the CGREC2 clear header and encrypted
+/// plaintext objects. Reads from a caller-owned buffer without copying so the
+/// caller can zero secret plaintext deterministically. Definite lengths only,
+/// minimal-length encodings enforced — anything else fails closed.
+struct CborReader {
+    const uint8_t* buf;
+    size_t len;
+    size_t off = 0;
+
+    CborReader(const uint8_t* b, size_t l) : buf(b), len(l) {}
+
+    bool readHead(uint8_t& major, uint64_t& value) {
+        if (off >= len) { return false; }
+        uint8_t initial = buf[off++];
+        major = initial >> 5;
+        uint8_t info = initial & 0x1f;
+        if (info < 24) {
+            value = info;
+            return true;
+        }
+        size_t extra;
+        uint64_t minValue;
+        switch (info) {
+            case 24: extra = 1; minValue = 24; break;
+            case 25: extra = 2; minValue = 0x100; break;
+            case 26: extra = 4; minValue = 0x10000; break;
+            case 27: extra = 8; minValue = 0x100000000ULL; break;
+            default: return false;  // indefinite lengths / reserved
+        }
+        if (len - off < extra) { return false; }
+        value = 0;
+        for (size_t i = 0; i < extra; i++) {
+            value = (value << 8) | buf[off++];
+        }
+        return value >= minValue;  // reject non-minimal encodings
+    }
+
+    /// Read a text (major 3) or byte (major 2) string; returns a view into buf.
+    bool readStringOfMajor(uint8_t expectedMajor, const uint8_t*& out, size_t& outLen) {
+        uint8_t major;
+        uint64_t length;
+        if (!readHead(major, length) || major != expectedMajor) { return false; }
+        if (length > len - off) { return false; }
+        out = buf + off;
+        outLen = (size_t)length;
+        off += outLen;
+        return true;
+    }
+
+    bool readUInt(uint64_t& out) {
+        uint8_t major;
+        return readHead(major, out) && major == 0;
+    }
+};
+
+inline bool keyEquals(const uint8_t* key, size_t keyLen, const char* expected) {
+    return keyLen == strlen(expected) && memcmp(key, expected, keyLen) == 0;
+}
+
+/// Parse + strictly validate the CGREC2 clear header:
+/// map { "aead", "iter", "kdf", "nonce", "pv", "salt", "v" } — exactly these
+/// keys, valid values. Returns views into `header` for salt/nonce.
+bool parseRecoveryHeaderV2(
+    const Data& header,
+    uint64_t& iterations,
+    const uint8_t*& salt, size_t& saltLen,
+    const uint8_t*& nonce, size_t& nonceLen,
+    uint64_t& pepperVersion
+) {
+    CborReader reader(header.data(), header.size());
+    uint8_t major;
+    uint64_t entryCount;
+    if (!reader.readHead(major, entryCount) || major != 5 || entryCount != 7) {
+        return false;
+    }
+
+    bool haveAead = false, haveIter = false, haveKdf = false, haveNonce = false;
+    bool havePv = false, haveSalt = false, haveV = false;
+
+    for (uint64_t i = 0; i < entryCount; i++) {
+        const uint8_t* key;
+        size_t keyLen;
+        if (!reader.readStringOfMajor(3, key, keyLen)) { return false; }
+
+        if (keyEquals(key, keyLen, "aead")) {
+            const uint8_t* val; size_t valLen;
+            if (haveAead || !reader.readStringOfMajor(3, val, valLen)) { return false; }
+            if (!keyEquals(val, valLen, "chacha20-poly1305")) { return false; }
+            haveAead = true;
+        } else if (keyEquals(key, keyLen, "iter")) {
+            if (haveIter || !reader.readUInt(iterations)) { return false; }
+            haveIter = true;
+        } else if (keyEquals(key, keyLen, "kdf")) {
+            const uint8_t* val; size_t valLen;
+            if (haveKdf || !reader.readStringOfMajor(3, val, valLen)) { return false; }
+            if (!keyEquals(val, valLen, "pbkdf2-sha256")) { return false; }
+            haveKdf = true;
+        } else if (keyEquals(key, keyLen, "nonce")) {
+            if (haveNonce || !reader.readStringOfMajor(2, nonce, nonceLen)) { return false; }
+            haveNonce = true;
+        } else if (keyEquals(key, keyLen, "pv")) {
+            if (havePv || !reader.readUInt(pepperVersion)) { return false; }
+            havePv = true;
+        } else if (keyEquals(key, keyLen, "salt")) {
+            if (haveSalt || !reader.readStringOfMajor(2, salt, saltLen)) { return false; }
+            haveSalt = true;
+        } else if (keyEquals(key, keyLen, "v")) {
+            uint64_t version;
+            if (haveV || !reader.readUInt(version)) { return false; }
+            if (version != 3) { return false; }
+            haveV = true;
+        } else {
+            return false;  // unknown clear-header field: fail closed
+        }
+    }
+
+    // All seven present, and nothing may trail the map.
+    return haveAead && haveIter && haveKdf && haveNonce && havePv && haveSalt && haveV
+        && reader.off == header.size();
+}
+
+/// Parse the decrypted v3 plaintext: map { "m": tstr, "bp"?: tstr, "meta"?: bstr }.
+/// Strict top-level key set. Secrets are copied into the out-strings, which the
+/// caller must zero; `metaBytes` is non-secret sanitized metadata.
+bool parseRecoveryPlaintextV2(
+    const uint8_t* buf, size_t bufLen,
+    std::string& mnemonic,
+    std::string& passphrase,
+    Data& metaBytes
+) {
+    CborReader reader(buf, bufLen);
+    uint8_t major;
+    uint64_t entryCount;
+    if (!reader.readHead(major, entryCount) || major != 5 || entryCount < 1 || entryCount > 3) {
+        return false;
+    }
+
+    bool haveM = false, haveBp = false, haveMeta = false;
+
+    for (uint64_t i = 0; i < entryCount; i++) {
+        const uint8_t* key;
+        size_t keyLen;
+        if (!reader.readStringOfMajor(3, key, keyLen)) { return false; }
+
+        if (keyEquals(key, keyLen, "m")) {
+            const uint8_t* val; size_t valLen;
+            if (haveM || !reader.readStringOfMajor(3, val, valLen) || valLen == 0) { return false; }
+            mnemonic.assign(reinterpret_cast<const char*>(val), valLen);
+            haveM = true;
+        } else if (keyEquals(key, keyLen, "bp")) {
+            const uint8_t* val; size_t valLen;
+            if (haveBp || !reader.readStringOfMajor(3, val, valLen) || valLen == 0) { return false; }
+            passphrase.assign(reinterpret_cast<const char*>(val), valLen);
+            haveBp = true;
+        } else if (keyEquals(key, keyLen, "meta")) {
+            const uint8_t* val; size_t valLen;
+            if (haveMeta || !reader.readStringOfMajor(2, val, valLen)) { return false; }
+            metaBytes.assign(val, val + valLen);
+            haveMeta = true;
+        } else {
+            return false;  // unknown plaintext field: fail closed
+        }
+    }
+
+    return haveM && reader.off == bufLen;
+}
+
+/// Append a CBOR byte-string head + payload (minimal-length encoding).
+void appendCborBytes(Data& out, const uint8_t* bytes, size_t count) {
+    if (count < 24) {
+        out.push_back(0x40 | (uint8_t)count);
+    } else if (count <= 0xff) {
+        out.push_back(0x58);
+        out.push_back((uint8_t)count);
+    } else if (count <= 0xffff) {
+        out.push_back(0x59);
+        out.push_back((uint8_t)(count >> 8));
+        out.push_back((uint8_t)(count & 0xff));
+    } else {
+        out.push_back(0x5a);
+        out.push_back((uint8_t)(count >> 24));
+        out.push_back((uint8_t)((count >> 16) & 0xff));
+        out.push_back((uint8_t)((count >> 8) & 0xff));
+        out.push_back((uint8_t)(count & 0xff));
+    }
+    out.insert(out.end(), bytes, bytes + count);
+}
+
+} // anonymous namespace
+
+TWData* _Nullable TWSecureSignerImportRecoveryV2(
+    TWData* _Nonnull headerBytesData,
+    TWData* _Nonnull ciphertextData,
+    TWString* _Nonnull secretStr,
+    const uint8_t* _Nullable pepper,
+    size_t pepperLen,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSaltStr,
+    TWSecureSignerProgressCallback _Nullable progressCallback,
+    const void* _Nullable callbackContext
+) {
+    const auto& header = *reinterpret_cast<const Data*>(headerBytesData);
+    const auto& ciphertext = *reinterpret_cast<const Data*>(ciphertextData);
+    const auto& secret = *reinterpret_cast<const std::string*>(secretStr);
+    const auto& hkdfSalt = *reinterpret_cast<const std::string*>(hkdfSaltStr);
+    SecKeyRef seKey = (SecKeyRef)seKeyRef;
+
+    // Authenticate-before-use: the header is parsed and strictly validated
+    // here, and its exact bytes are bound as AAD, so any tampering — including
+    // fields this parser accepted — fails the Poly1305 tag below.
+    uint64_t iterations = 0;
+    uint64_t pepperVersion = 0;
+    const uint8_t* salt = nullptr;
+    size_t saltLen = 0;
+    const uint8_t* nonce = nullptr;
+    size_t nonceLen = 0;
+    if (!parseRecoveryHeaderV2(header, iterations, salt, saltLen, nonce, nonceLen, pepperVersion)) {
+        return nullptr;
+    }
+    if (iterations < 100000 || iterations > 10000000) {
+        return nullptr;  // DoS prevention
+    }
+    if (saltLen != 16 || nonceLen != 12) {
+        return nullptr;
+    }
+    if (pepperVersion > 1) {
+        return nullptr;  // unknown pepper version: fail closed, don't guess
+    }
+    // The caller derives the pepper from the header's pv; enforce consistency.
+    if ((pepperVersion >= 1) != (pepper != nullptr && pepperLen > 0)) {
+        return nullptr;
+    }
+    if (ciphertext.size() <= 16) {
+        return nullptr;
+    }
+
+    // Build PBKDF2 password: secret || pepper
+    std::vector<uint8_t> password(secret.begin(), secret.end());
+    if (pepper && pepperLen > 0) {
+        password.insert(password.end(), pepper, pepper + pepperLen);
+    }
+
+    // Derive key using incremental PBKDF2-HMAC-SHA256 with progress callback
+    uint8_t derivedKey[32];
+    {
+        PBKDF2_HMAC_SHA256_CTX pctx;
+        pbkdf2_hmac_sha256_Init(&pctx, password.data(), (int)password.size(),
+                                salt, (int)saltLen, 1);
+
+        const uint32_t chunkSize = 1000;
+        uint32_t remaining = (uint32_t)iterations;
+
+        while (remaining > 0) {
+            uint32_t batch = (remaining < chunkSize) ? remaining : chunkSize;
+            pbkdf2_hmac_sha256_Update(&pctx, batch);
+            remaining -= batch;
+
+            if (progressCallback) {
+                double progress = (double)(iterations - remaining) / (double)iterations;
+                progressCallback(progress, callbackContext);
+            }
+        }
+
+        pbkdf2_hmac_sha256_Final(&pctx, derivedKey);
+        memzero(&pctx, sizeof(pctx));
+    }
+    memzero(password.data(), password.size());
+
+    // AAD = "CGREC2" || exact header bytes — the complete clear header is
+    // authenticated; there is no unauthenticated metadata in this format.
+    std::vector<uint8_t> aad;
+    aad.reserve(6 + header.size());
+    const char magic[6] = {'C', 'G', 'R', 'E', 'C', '2'};
+    aad.insert(aad.end(), magic, magic + 6);
+    aad.insert(aad.end(), header.begin(), header.end());
+
+    // Split ciphertext and tag
+    size_t ciphertextOnly = ciphertext.size() - 16;
+    const uint8_t* ct = ciphertext.data();
+    const uint8_t* tag = ciphertext.data() + ciphertextOnly;
+
+    std::vector<uint8_t> plaintext(ciphertextOnly);
+
+    chacha20poly1305_ctx ctx;
+    rfc7539_init(&ctx, derivedKey, nonce);
+    rfc7539_auth(&ctx, aad.data(), aad.size());
+    chacha20poly1305_decrypt(&ctx, ct, plaintext.data(), ciphertextOnly);
+
+    uint8_t computedTag[16];
+    rfc7539_finish(&ctx, aad.size(), ciphertextOnly, computedTag);
+
+    memzero(derivedKey, sizeof(derivedKey));
+    memzero(&ctx, sizeof(ctx));
+
+    // Constant-time tag comparison
+    uint8_t diff = 0;
+    for (int i = 0; i < 16; i++) {
+        diff |= computedTag[i] ^ tag[i];
+    }
+    memzero(computedTag, sizeof(computedTag));
+
+    if (diff != 0) {
+        memzero(plaintext.data(), plaintext.size());
+        return nullptr;  // Wrong PIN or corrupted data
+    }
+
+    // Parse the authenticated plaintext object in place, then zero it.
+    std::string mnemonic;
+    std::string passphrase;
+    Data metaBytes;
+    bool parsedOk = parseRecoveryPlaintextV2(plaintext.data(), plaintext.size(),
+                                             mnemonic, passphrase, metaBytes);
+    memzero(plaintext.data(), plaintext.size());
+
+    auto zeroSecrets = [&]() {
+        if (!mnemonic.empty()) { memzero(mnemonic.data(), mnemonic.size()); }
+        if (!passphrase.empty()) { memzero(passphrase.data(), passphrase.size()); }
+    };
+
+    if (!parsedOk || !Mnemonic::isValid(mnemonic)) {
+        zeroSecrets();
+        return nullptr;
+    }
+
+    // SE-encrypt the wallet secret — the mnemonic and passphrase never leave C++.
+    std::string envelope = makeWalletSecretEnvelope(mnemonic, passphrase);
+    Data encrypted = encryptMnemonic(envelope, seKey, hkdfSalt);
+    memzero(envelope.data(), envelope.size());
+    zeroSecrets();
+
+    if (encrypted.empty()) {
+        return nullptr;
+    }
+
+    // Return CBOR { "blob": SE blob, "meta"?: sanitized metadata } — no secrets.
+    Data out;
+    out.reserve(2 + 5 + encrypted.size() + 5 + 5 + metaBytes.size());
+    out.push_back(metaBytes.empty() ? 0xa1 : 0xa2);
+    out.push_back(0x64);  // tstr(4)
+    out.insert(out.end(), {'b', 'l', 'o', 'b'});
+    appendCborBytes(out, encrypted.data(), encrypted.size());
+    if (!metaBytes.empty()) {
+        out.push_back(0x64);  // tstr(4)
+        out.insert(out.end(), {'m', 'e', 't', 'a'});
+        appendCborBytes(out, metaBytes.data(), metaBytes.size());
+    }
+
+    return TWDataCreateWithBytes(out.data(), out.size());
 }
 
 #endif // __APPLE__

@@ -37,6 +37,15 @@
 #include <TrezorCrypto/rfc6979.h>
 #include <TrezorCrypto/secp256k1.h>
 
+#if defined(CRYPTOGRAPH_REQUIRE_RFC6979)
+// Exported from the same translation unit as ecdsa_sign_digest so final
+// artifacts can attest the mode that compiled the production signing path.
+// Android's version script deliberately preserves TW-prefixed exports.
+__attribute__((visibility("default"))) int TWCryptographRFC6979Mode(void) {
+  return USE_RFC6979;
+}
+#endif
+
 // Set cp2 = cp1
 void point_copy(const curve_point *cp1, curve_point *cp2) { *cp2 = *cp1; }
 

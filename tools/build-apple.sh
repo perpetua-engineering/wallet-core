@@ -54,7 +54,7 @@ fi
 # Shared Rust target dir — Cargo handles its own file locking, so multiple
 # agents/worktrees can safely point here. Avoids redundant 7+ min Rust
 # compiles when only C++ changed.
-RUST_TARGET_DIR="${RUST_TARGET_DIR:-${HOME}/.cryptograph/cache/rust-target/wallet-core}"
+RUST_TARGET_DIR="${RUST_TARGET_DIR:-${SV_HOME:-${SUPERVISOR_HOME:-${HOME}/.sv}}/cache/cryptograph/rust-target/wallet-core}"
 mkdir -p "$RUST_TARGET_DIR"
 
 ensure_rust_lib() {
@@ -199,6 +199,9 @@ if $DEV_MODE; then
     -library "$MAC_ARM64_COMBINED" -headers "$HEADER_STAGE" \
     -output "$XCFRAMEWORK_PATH"
 
+  echo "==> Verifying Apple RNG provider"
+  "${ROOT}/tools/verify-apple-rng.sh" "$XCFRAMEWORK_PATH"
+
   echo "✅ Dev build done. XCFramework at ${XCFRAMEWORK_PATH}"
   echo "   Platforms: macOS arm64, iOS Simulator arm64, watchOS Simulator arm64"
   echo "   Good for: swift test, simulator builds"
@@ -301,5 +304,8 @@ xcodebuild -create-xcframework \
   -library "$WATCH_SIM_UNIV" -headers "$HEADER_STAGE" \
   -library "$MAC_UNIV" -headers "$HEADER_STAGE" \
   -output "$XCFRAMEWORK_PATH"
+
+echo "==> Verifying Apple RNG provider"
+"${ROOT}/tools/verify-apple-rng.sh" "$XCFRAMEWORK_PATH"
 
 echo "✅ Done. XCFramework available at ${XCFRAMEWORK_PATH}"

@@ -51,6 +51,12 @@
 #define USE_RFC6979 1
 #endif
 
+// Cryptograph production artifacts pin deterministic ECDSA signing nonces.
+// Keep this check after the upstream default so an explicit non-1 value fails.
+#if defined(CRYPTOGRAPH_REQUIRE_RFC6979) && USE_RFC6979 != 1
+#error "Cryptograph WalletCore requires USE_RFC6979=1"
+#endif
+
 // implement BIP32 caching
 #ifndef USE_BIP32_CACHE
 #define USE_BIP32_CACHE 0 // [wallet-core]
@@ -65,7 +71,7 @@
 
 // implement BIP39 caching
 #ifndef USE_BIP39_CACHE
-#define USE_BIP39_CACHE 1
+#define USE_BIP39_CACHE 0 // cache retains plaintext mnemonic/passphrase/seed for process lifetime, uncleared
 #define BIP39_CACHE_SIZE 4
 #endif
 

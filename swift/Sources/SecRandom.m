@@ -4,7 +4,8 @@
 // terms governing use, modification, and redistribution, is contained in the
 // file LICENSE at the root of the source code distribution tree.
 
-@import Security;
+#include <stdlib.h>
+#include <Security/Security.h>
 
 uint32_t random32(void) {
     uint32_t value;

@@ -329,16 +329,19 @@ public enum SecureSigner {
     /// - Returns: SE-encrypted mnemonic blob, or nil if invalid mnemonic or error
     public static func importSeedPhrase(
         mnemonic: String,
+        passphrase: String = "",
         seKey: SecKey,
         hkdfSalt: String
     ) -> Data? {
         let mnemonicPtr = TWStringCreateWithNSString(mnemonic)
+        let passphrasePtr = TWStringCreateWithNSString(passphrase)
         let saltPtr = TWStringCreateWithNSString(hkdfSalt)
         let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
 
-        let result = TWSecureSignerImportSeedPhrase(mnemonicPtr, keyPtr, saltPtr)
+        let result = TWSecureSignerImportSeedPhrase(mnemonicPtr, passphrasePtr, keyPtr, saltPtr)
 
         TWStringDelete(mnemonicPtr)
+        TWStringDelete(passphrasePtr)
         TWStringDelete(saltPtr)
 
         guard let result else { return nil }
@@ -437,6 +440,85 @@ public enum SecureSigner {
         if let serialTWStr {
             TWStringDelete(serialTWStr)
         }
+
+        guard let result else { return nil }
+        return TWDataNSData(result)
+    }
+
+    /// Decrypts a CGREC2 (payload v3) unified recovery envelope, validates the
+    /// mnemonic, and SE-encrypts it — entirely in C++.
+    ///
+    /// The complete envelope is authenticated before anything is returned:
+    /// AAD = "CGREC2" || headerBytes. The mnemonic and BIP-39 passphrase never
+    /// enter Swift memory; the returned bytes are the CBOR map
+    /// `{ "blob": SE-encrypted wallet secret, "meta"?: sanitized metadata }`.
+    ///
+    /// - Parameters:
+    ///   - headerBytes: Exact clear-header CBOR bytes from the envelope's `h` field
+    ///   - ciphertext: Ciphertext + Poly1305 tag (tag is last 16 bytes)
+    ///   - secret: Normalized secret (PIN digits or lowercased passphrase)
+    ///   - pepper: Session binding pepper (23 bytes) iff the header's pv >= 1
+    ///   - seKey: Secure Enclave private key for ECDH encryption
+    ///   - hkdfSalt: Domain separator for SE HKDF key derivation
+    ///   - progress: Optional callback for KDF progress (0.0 to 1.0)
+    /// - Returns: CBOR `{blob, meta?}` bytes, or nil on any validation/authentication failure
+    public static func importRecoveryV2(
+        headerBytes: Data,
+        ciphertext: Data,
+        secret: String,
+        pepper: Data?,
+        seKey: SecKey,
+        hkdfSalt: String,
+        progress: ((Double) -> Void)? = nil
+    ) -> Data? {
+        // Validate what can be validated at the Swift boundary; the C++ side
+        // re-validates the parsed header independently.
+        guard !headerBytes.isEmpty else { return nil }
+        guard ciphertext.count > 16 else { return nil } // must have at least 1 byte + 16-byte tag
+
+        let headerPtr = TWDataCreateWithNSData(headerBytes)
+        let ctPtr = TWDataCreateWithNSData(ciphertext)
+        let secretPtr = TWStringCreateWithNSString(secret)
+        let hkdfSaltPtr = TWStringCreateWithNSString(hkdfSalt)
+        let keyPtr = Unmanaged.passUnretained(seKey).toOpaque()
+
+        // Copy pepper into a contiguous array so the pointer stays valid
+        let pepperBytes: [UInt8] = pepper.map { Array($0) } ?? []
+
+        // Bridge the Swift progress closure to a C function pointer via context.
+        // withUnsafeMutablePointer keeps closurePtr alive for the duration of the call.
+        var progressClosure = progress
+        let cCallback: TWSecureSignerProgressCallback?
+        if progress != nil {
+            cCallback = { (p: Double, rawCtx: UnsafeRawPointer?) in
+                guard let rawCtx else { return }
+                let ptr = rawCtx.assumingMemoryBound(to: Optional<(Double) -> Void>.self)
+                ptr.pointee?(p)
+            }
+        } else {
+            cCallback = nil
+        }
+
+        let result = withUnsafeMutablePointer(to: &progressClosure) { closurePtr in
+            pepperBytes.withUnsafeBufferPointer { pepperBuf in
+                TWSecureSignerImportRecoveryV2(
+                    headerPtr,
+                    ctPtr,
+                    secretPtr,
+                    pepperBuf.isEmpty ? nil : pepperBuf.baseAddress,
+                    pepperBuf.count,
+                    keyPtr,
+                    hkdfSaltPtr,
+                    cCallback,
+                    progress != nil ? UnsafeMutableRawPointer(closurePtr) : nil
+                )
+            }
+        }
+
+        TWDataDelete(headerPtr)
+        TWDataDelete(ctPtr)
+        TWStringDelete(secretPtr)
+        TWStringDelete(hkdfSaltPtr)
 
         guard let result else { return nil }
         return TWDataNSData(result)

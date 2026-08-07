@@ -10,6 +10,23 @@ if (NOT ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang"))
     message(FATAL_ERROR "You should use clang compiler")
 endif ()
 
+# The Apple RNG override is implemented in Objective-C so it can call the
+# Security framework directly.  Without enabling the language here,
+# swift/Sources/SecRandom.m is never part of the native WalletCore archive.
+#
+# trezor-crypto/crypto/rand.c deliberately compiles to nothing on Apple, so
+# there is no longer a weak /dev/urandom fallback to lose to: an Apple build
+# that omits this file fails to link with unresolved random32/random_buffer.
+if (APPLE)
+    enable_language(OBJC)
+    set(WALLET_CORE_APPLE_RNG_PROVIDER
+        ${CMAKE_CURRENT_SOURCE_DIR}/swift/Sources/SecRandom.m)
+    if (NOT EXISTS ${WALLET_CORE_APPLE_RNG_PROVIDER})
+        message(FATAL_ERROR
+            "Apple RNG provider missing: ${WALLET_CORE_APPLE_RNG_PROVIDER}")
+    endif ()
+endif ()
+
 if ("$ENV{PREFIX}" STREQUAL "")
     set(PREFIX "${CMAKE_SOURCE_DIR}/build/local")
 else ()
@@ -50,6 +67,10 @@ include(cmake/Protobuf.cmake)
 if (${ANDROID})
     message("Configuring for Android JNI")
     file(GLOB_RECURSE core_sources src/*.c src/*.cc src/*.cpp src/*.h jni/cpp/*.cpp jni/cpp/*.h)
+    # Keep the security-critical RNG provider in its own object even when the
+    # rest of WalletCore uses a unity build. The Android artifact verifier can
+    # then prove exact object ownership of random32/random_buffer.
+    set_source_files_properties(jni/cpp/Random.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     if (${KOTLIN})
         file(GLOB_RECURSE specific_sources
                 jni/kotlin/*.h
@@ -87,6 +108,12 @@ elseif (${TW_COMPILE_JAVA})
         file(GLOB_RECURSE specific_sources jni/android/*.h jni/android/*.c)
     endif ()
     set(sources ${core_sources} ${specific_sources})
+    if (APPLE)
+        # A JNI build on an Apple host is an Apple build: rand.c contributes no
+        # RNG definitions there, so without the provider this target no longer
+        # links at all.
+        list(APPEND sources ${WALLET_CORE_APPLE_RNG_PROVIDER})
+    endif ()
     add_library(TrustWalletCore SHARED ${sources} ${PROTO_SRCS} ${PROTO_HDRS})
     find_package(JNI REQUIRED)
     target_include_directories(TrustWalletCore PRIVATE ${JNI_INCLUDE_DIRS})
@@ -94,13 +121,28 @@ elseif (${TW_COMPILE_JAVA})
 elseif (${FLUTTER})
     message("Configuring for Flutter")
     file(GLOB_RECURSE sources src/*.c src/*.cc src/*.cpp src/*.h)
+    if (APPLE)
+        list(APPEND sources ${WALLET_CORE_APPLE_RNG_PROVIDER})
+    endif ()
     add_library(TrustWalletCore SHARED ${sources} ${PROTO_SRCS} ${PROTO_HDRS})
     target_link_libraries(TrustWalletCore PUBLIC ${WALLET_CORE_BINDGEN} ${PROJECT_NAME}_INTERFACE PRIVATE TrezorCrypto protobuf Boost::boost)
 else ()
     message("Configuring standalone")
     file(GLOB_RECURSE sources src/*.c src/*.cc src/*.cpp src/*.h)
+    if (APPLE)
+        list(APPEND sources ${WALLET_CORE_APPLE_RNG_PROVIDER})
+    endif ()
     add_library(TrustWalletCore STATIC ${sources} ${PROTO_SRCS} ${PROTO_HDRS})
     target_link_libraries(TrustWalletCore PUBLIC ${WALLET_CORE_BINDGEN} ${PROJECT_NAME}_INTERFACE PRIVATE TrezorCrypto protobuf Boost::boost)
+endif ()
+
+if (APPLE)
+    # SecRandom.m references _SecRandomCopyBytes / _kSecRandomDefault, so every
+    # Apple configuration needs Security.framework. The SHARED variants
+    # (TW_COMPILE_JAVA on an Apple host, FLUTTER) resolve it at their own link
+    # step and fail outright without it; the standalone STATIC archive defers
+    # resolution to its consumer, where this records the usage requirement.
+    target_link_libraries(TrustWalletCore PRIVATE "-framework Security")
 endif ()
 
 if (TW_CODE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

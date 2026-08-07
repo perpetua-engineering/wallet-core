@@ -228,12 +228,14 @@ TWData* _Nullable TWSecureSignerCreateWallet(
 /// Swift never sees the mnemonic after this call returns.
 ///
 /// \param mnemonic BIP-39 mnemonic string (12 or 24 words)
+/// \param passphrase BIP-39 passphrase string. Empty string preserves legacy wallets.
 /// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
 /// \param hkdfSalt Domain separator for HKDF key derivation (must match decryption salt)
 /// \returns SE-encrypted mnemonic blob, or nullptr if invalid/error/non-Apple. Caller must delete.
 TW_EXPORT_STATIC_METHOD
 TWData* _Nullable TWSecureSignerImportSeedPhrase(
     TWString* _Nonnull mnemonic,
+    TWString* _Nonnull passphrase,
     const void* _Nonnull seKeyRef,
     TWString* _Nonnull hkdfSalt
 );
@@ -275,6 +277,42 @@ TWData* _Nullable TWSecureSignerImportRecovery(
     const uint8_t* _Nullable pepper,
     size_t pepperLen,
     TWString* _Nullable serial,
+    const void* _Nonnull seKeyRef,
+    TWString* _Nonnull hkdfSalt,
+    TWSecureSignerProgressCallback _Nullable progressCallback,
+    const void* _Nullable callbackContext
+);
+
+/// Decrypt a CGREC2 (payload v3) unified recovery envelope, validate the
+/// mnemonic, SE-encrypt it, and return the sanitized policy metadata.
+///
+/// The complete envelope is authenticated before anything is returned:
+/// AAD = "CGREC2" || headerBytes (the exact clear-header CBOR carried in the
+/// artifact). The header is re-parsed and strictly validated here — iteration
+/// bounds, salt/nonce lengths, algorithm identifiers, version, pepper version —
+/// independent of any Swift-side validation. The decrypted plaintext is the
+/// canonical CBOR object { "m": mnemonic, "bp"?: passphrase, "meta"?: bstr }.
+/// The mnemonic and passphrase never leave C++; the returned buffer is the CBOR
+/// map { "blob": SE-encrypted wallet secret, "meta"?: metadata bytes } where
+/// "meta" contains no secrets (serial, Time Lock, locations, away limit).
+///
+/// \param headerBytes Exact clear-header CBOR bytes from the envelope's `h` field
+/// \param ciphertext Ciphertext + Poly1305 tag (tag is last 16 bytes)
+/// \param secret Normalized secret (PIN digits or lowercased passphrase), UTF-8
+/// \param pepper Optional session binding pepper (23 bytes), or NULL if header pv == 0
+/// \param pepperLen Length of pepper (0 if NULL)
+/// \param seKeyRef SecKeyRef cast to void* (Apple platforms only)
+/// \param hkdfSalt Domain separator for SE HKDF key derivation (must match decryption salt)
+/// \param progressCallback Optional callback for KDF progress, or NULL
+/// \param callbackContext Opaque pointer passed to progressCallback
+/// \returns CBOR { blob, meta? }, or nullptr on any validation/authentication failure
+TW_EXPORT_STATIC_METHOD
+TWData* _Nullable TWSecureSignerImportRecoveryV2(
+    TWData* _Nonnull headerBytes,
+    TWData* _Nonnull ciphertext,
+    TWString* _Nonnull secret,
+    const uint8_t* _Nullable pepper,
+    size_t pepperLen,
     const void* _Nonnull seKeyRef,
     TWString* _Nonnull hkdfSalt,
     TWSecureSignerProgressCallback _Nullable progressCallback,
