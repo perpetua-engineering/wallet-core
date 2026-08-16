@@ -79,4 +79,14 @@ TEST(Base64, isBase64) {
     EXPECT_FALSE(isBase64orBase64Url("MwCKhieGGl3ZbJ2zzggHsSLaXtRzk0znVopbSxw2HLsors=#"));
 }
 
+TEST(Base64, DecodeNullEmbedded) {
+    auto withNul = std::string("SGVsbG8=") + '\0' + "garbage";
+    auto decoded = decode(withNul);
+    EXPECT_TRUE(decoded.empty());
+
+    auto trailingNul = std::string("SGVsbG8=") + '\0';
+    decoded = decode(trailingNul);
+    EXPECT_TRUE(decoded.empty());
+}
+
 } // namespace TW::Base64::tests

@@ -33,4 +33,12 @@ TEST(HexCoding, isHexEncoded) {
     ASSERT_FALSE(is_hex_encoded("0xyahoo"));
 }
 
+TEST(HexCoding, ParseHexNullEmbedded) {
+    auto withNul = std::string("deadbeef") + '\0' + "junk";
+    EXPECT_TRUE(parse_hex(withNul).empty());
+
+    auto trailingNul = std::string("deadbeef") + '\0';
+    EXPECT_TRUE(parse_hex(trailingNul).empty());
+}
+
 }

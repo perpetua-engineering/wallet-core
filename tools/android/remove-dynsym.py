@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Remove a named dynamic symbol import from a 32/64-bit ELF shared object.
 
-Used by deps/wallet-core/tools/verify-android-rng.sh to build a 
-negative fixture with a required dynamic import renamed away, proving the
+Used by deps/wallet-core/tools/verify-android-rng.sh to build a negative fixture with a required dynamic import renamed away, proving the
 verifier rejects artifacts whose kernel-CSPRNG dependency is gone.
 
 The rename is done in place against .dynstr (padded to the exact original

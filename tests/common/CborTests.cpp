@@ -517,5 +517,58 @@ TEST(Cbor, GetTagElementNotTag) {
     }
     FAIL() << "Expected exception";
 }
+
+TEST(Cbor, BytesOverflowLength_isValid) {
+    Data overflow = parse_hex("5b00000000ffffffff");
+    EXPECT_FALSE(Decode(overflow).isValid());
+}
+
+TEST(Cbor, StringOverflowLength_isValid) {
+    Data overflow = parse_hex("7b0000000100000000");
+    EXPECT_FALSE(Decode(overflow).isValid());
+}
+
+TEST(Cbor, BytesOverflowLength_getBytes) {
+    Data overflow = parse_hex("5b00000000ffffffff");
+    try {
+        Decode(overflow).getBytes();
+    } catch (const std::invalid_argument& ex) {
+        EXPECT_NE(std::string(ex.what()).find("overflow"), std::string::npos);
+        return;
+    }
+    FAIL() << "Expected exception";
+}
+
+TEST(Cbor, BytesOverflowLength_getTotalLen) {
+    Data overflow = parse_hex("5b00000000ffffffff");
+    try {
+        Decode(overflow).dumpToString();
+    } catch (const std::invalid_argument& ex) {
+        EXPECT_NE(std::string(ex.what()).find("overflow"), std::string::npos);
+        return;
+    }
+    FAIL() << "Expected exception";
+}
+
+TEST(Cbor, GetCompoundLengthOverflow) {
+    Data overflow = parse_hex("9bffffffffffffffff");
+    EXPECT_FALSE(Decode(overflow).isValid());
+}
+
+TEST(Cbor, BytesUint64LengthOverflow_isValid) {
+    Data overflow = parse_hex("5bffffffffffffffff");
+    EXPECT_FALSE(Decode(overflow).isValid());
+}
+
+TEST(Cbor, BytesUint64LengthOverflow_getBytes) {
+    Data overflow = parse_hex("5bffffffffffffffff");
+    try {
+        Decode(overflow).getBytes();
+    } catch (const std::invalid_argument& ex) {
+        EXPECT_NE(std::string(ex.what()).find("overflow"), std::string::npos);
+        return;
+    }
+    FAIL() << "Expected exception";
+}
 // clang-format on
 } // namespace TW::Cbor::tests

@@ -31,6 +31,15 @@ Data Entry::preImageHashes([[maybe_unused]] TWCoinType coin, const Data& txInput
         txInputData, [](const auto& input, auto& output) {
             const auto signer = Signer(input);
             auto preImage = signer.signaturePreimage();
+            if (preImage.empty()) {
+                output.set_error(input.raw_json().empty()
+                                     ? Common::Proto::Error_invalid_address
+                                     : Common::Proto::Error_invalid_params);
+                output.set_error_message(input.raw_json().empty()
+                                             ? "Invalid Tron address"
+                                             : "Invalid Tron raw transaction");
+                return;
+            }
             auto preImageHash = signer.signaturePreimageHash();
             output.set_data_hash(preImageHash.data(), preImageHash.size());
             output.set_data(preImage.data(), preImage.size());

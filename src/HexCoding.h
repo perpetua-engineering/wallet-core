@@ -24,7 +24,11 @@ inline Data parse_hex(const std::string& input) {
     if (input.empty()) {
         return {};
     }
-
+    // (#4763): an embedded NUL is silently truncated by CStr::from_ptr in the Rust FFI,
+    // so "deadbeef\x00junk" would decode as just "deadbeef".
+    if (input.find('\0') != std::string::npos) {
+        return {};
+    }
     Rust::CByteArrayResultWrapper res = Rust::decode_hex(input.c_str());
     return res.unwrap_or_default().data;
 }

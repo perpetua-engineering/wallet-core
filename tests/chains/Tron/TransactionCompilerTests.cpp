@@ -156,7 +156,7 @@ TEST(TronCompiler, CompileWithSignaturesRawJson) {
     // Verify signature (pubkey & hash & signature)
     EXPECT_TRUE(publicKey.verify(signature, TW::data(preSigningOutput.data_hash())));
     /// Step 3: Compile transaction info
-    const auto expectedTx = R"({"raw_data":{"contract":[{"parameter":{"type_url":"type.googleapis.com/protocol.TransferAssetContract","value":{"amount":4,"asset_name":"31303030393539","owner_address":"415cd0fb0ab3ce40f3051414c604b27756e69e43db","to_address":"41521ea197907927725ef36d70f25f850d1659c7c7"}},"type":"TransferAssetContract"}],"expiration":1541926116000,"ref_block_bytes":"b801","ref_block_hash":"0e2bc08d550f5f58","timestamp":1539295479000},"signature":["77f5eabde31e739d34a66914540f1756981dc7d782c9656f5e14e53b59a15371603a183aa12124adeee7991bf55acc8e488a6ca04fb393b1a8ac16610eeafdfc00"],"txID":"546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb","visible":false})";
+    const auto expectedTx = R"({"raw_data":{"contract":[{"parameter":{"type_url":"type.googleapis.com/protocol.TransferAssetContract","value":{"amount":4,"asset_name":"31303030393539","owner_address":"415cd0fb0ab3ce40f3051414c604b27756e69e43db","to_address":"41521ea197907927725ef36d70f25f850d1659c7c7"}},"type":"TransferAssetContract"}],"expiration":1541926116000,"ref_block_bytes":"b801","ref_block_hash":"0e2bc08d550f5f58","timestamp":1539295479000},"raw_data_hex":"0a02b80122080e2bc08d550f5f5840a0b5d58ff02c5a730802126f0a32747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e5472616e736665724173736574436f6e747261637412390a07313030303935391215415cd0fb0ab3ce40f3051414c604b27756e69e43db1a1541521ea197907927725ef36d70f25f850d1659c7c7200470d889a4a9e62c","signature":["77f5eabde31e739d34a66914540f1756981dc7d782c9656f5e14e53b59a15371603a183aa12124adeee7991bf55acc8e488a6ca04fb393b1a8ac16610eeafdfc00"],"txID":"546a3d07164c624809cf4e564a083a7a7974bb3c4eff6bb3e278b0ca21083fcb","visible":false})";
     auto outputData =
         TransactionCompiler::compileWithSignatures(coin, inputStrData, {signature}, {publicKey.bytes});
 
@@ -180,4 +180,23 @@ TEST(TronCompiler, CompileWithSignaturesRawJson) {
         EXPECT_EQ(output.json().size(), 0ul);
         EXPECT_EQ(output.error(), Common::Proto::Error_invalid_params);
     }
+}
+
+TEST(TronCompiler, PreImageHashesRejectsInvalidAddress) {
+    auto input = Tron::Proto::SigningInput();
+    auto& transaction = *input.mutable_transaction();
+    auto& transfer = *transaction.mutable_transfer();
+    transfer.set_owner_address("TJRyWwFs9wTFGZg3JbrVriFbNfCug5tDeC");
+    transfer.set_to_address("INVALID_NOT_BASE58");
+    transfer.set_amount(100);
+
+    const auto serializedInput = input.SerializeAsString();
+    const auto inputData = Data(serializedInput.begin(), serializedInput.end());
+    const auto outputData = TransactionCompiler::preImageHashes(TWCoinTypeTron, inputData);
+
+    auto output = TxCompiler::Proto::PreSigningOutput();
+    ASSERT_TRUE(output.ParseFromArray(outputData.data(), static_cast<int>(outputData.size())));
+    EXPECT_EQ(output.error(), Common::Proto::Error_invalid_address);
+    EXPECT_TRUE(output.data().empty());
+    EXPECT_TRUE(output.data_hash().empty());
 }

@@ -3,6 +3,7 @@
 // Copyright © 2017 Trust Wallet.
 
 #include "Signer.h"
+#include "Address.h"
 
 #include "Protobuf/TronInternal.pb.h"
 
@@ -24,12 +25,33 @@ using json = nlohmann::json;
 namespace {
 
 constexpr size_t kTransactionHashSize = 32;
+constexpr size_t kMaxRawJsonSize = 1024 * 1024;
+constexpr size_t kMaxTransactionWrapperDepth = 16;
+
+/// Decode a Base58Check-encoded Tron address, throwing on invalid input.
+Data decodeAddress(const std::string& address) {
+    const auto decoded = Base58::decodeCheck(address);
+    if (decoded.size() != Address::size || decoded[0] != Address::prefix) {
+        throw std::invalid_argument("Invalid Tron address: " + address);
+    }
+    return decoded;
+}
 
 std::string stripHexPrefix(std::string value) {
     if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0) {
         return value.substr(2);
     }
     return value;
+}
+
+Data parseAddress(const std::string& address) {
+    const auto decoded = (!address.empty() && address.front() == 'T')
+        ? decodeAddress(address)
+        : parse_hex(stripHexPrefix(address));
+    if (decoded.size() != Address::size || decoded[0] != Address::prefix) {
+        throw std::invalid_argument("Invalid Tron address: " + address);
+    }
+    return decoded;
 }
 
 bool parseHexString(const std::string& value, const char* fieldName, Data& bytes, std::string& errorMessage, size_t expectedSize = 0) {
@@ -98,11 +120,7 @@ Data parseHexField(const json& object, const char* key) {
 }
 
 Data parseAddressField(const json& object, const char* key) {
-    const auto value = requireString(object, key);
-    if (!value.empty() && value.front() == 'T') {
-        return Base58::decodeCheck(value);
-    }
-    return parse_hex(stripHexPrefix(value));
+    return parseAddress(requireString(object, key));
 }
 
 protocol::ResourceCode parseResourceCodeField(const json& object, const char* key) {
@@ -238,10 +256,7 @@ protocol::Transaction::Contract parseContract(const json& contractJSON) {
             if (!addressJSON.is_string()) {
                 throw std::invalid_argument("Expected vote_address string");
             }
-            const auto address = addressJSON.get<std::string>();
-            const auto decoded = (!address.empty() && address.front() == 'T')
-                ? Base58::decodeCheck(address)
-                : parse_hex(stripHexPrefix(address));
+            const auto decoded = parseAddress(addressJSON.get<std::string>());
             vote.add_vote_address(decoded.data(), decoded.size());
         }
         any.PackFrom(vote);
@@ -346,17 +361,32 @@ Data serializeRawDataJSON(const json& rawDataJSON) {
     return Data(serialized.begin(), serialized.end());
 }
 
+json parseRawJson(const std::string& rawJson) {
+    if (rawJson.size() > kMaxRawJsonSize) {
+        throw std::invalid_argument("raw JSON exceeds maximum allowed size 1 MB");
+    }
+    return json::parse(rawJson);
+}
+
 /// Returns a reference to the actual transaction object within the JSON.
 /// Some dApps (e.g. SUN.io) wrap transactions in one or more {"transaction": {...}} layers.
-/// Recursively unwraps until we find the object with raw_data/raw_data_hex/txID.
+/// Unwraps until we find the object with raw_data/raw_data_hex/txID, with a bound to avoid
+/// attacker-controlled stack or traversal exhaustion.
 json& findTransactionObject(json& parsed) {
-    if (parsed.contains("raw_data") || parsed.contains("raw_data_hex") || parsed.contains("txID")) {
-        return parsed;
+    auto* current = &parsed;
+    for (size_t depth = 0; depth <= kMaxTransactionWrapperDepth; ++depth) {
+        if (current->contains("raw_data") || current->contains("raw_data_hex") || current->contains("txID")) {
+            return *current;
+        }
+        if (!current->contains("transaction") || !(*current)["transaction"].is_object()) {
+            return *current;
+        }
+        if (depth == kMaxTransactionWrapperDepth) {
+            throw std::invalid_argument("raw JSON transaction wrapper exceeds maximum nesting depth");
+        }
+        current = &(*current)["transaction"];
     }
-    if (parsed.contains("transaction") && parsed["transaction"].is_object()) {
-        return findTransactionObject(parsed["transaction"]);
-    }
-    return parsed;
+    throw std::invalid_argument("raw JSON transaction wrapper exceeds maximum nesting depth");
 }
 
 bool ensureTransactionHashes(json& parsed, std::string& errorMessage) {
@@ -430,10 +460,10 @@ bool ensureTransactionHashes(json& parsed, std::string& errorMessage) {
 protocol::TransferContract to_internal(const Proto::TransferContract& transfer) {
     auto internal = protocol::TransferContract();
 
-    const auto ownerAddress = Base58::decodeCheck(transfer.owner_address());
+    const auto ownerAddress = decodeAddress(transfer.owner_address());
     internal.set_owner_address(ownerAddress.data(), ownerAddress.size());
 
-    const auto toAddress = Base58::decodeCheck(transfer.to_address());
+    const auto toAddress = decodeAddress(transfer.to_address());
     internal.set_to_address(toAddress.data(), toAddress.size());
 
     internal.set_amount(transfer.amount());
@@ -448,10 +478,10 @@ protocol::TransferAssetContract to_internal(const Proto::TransferAssetContract& 
 
     internal.set_asset_name(transfer.asset_name());
 
-    const auto ownerAddress = Base58::decodeCheck(transfer.owner_address());
+    const auto ownerAddress = decodeAddress(transfer.owner_address());
     internal.set_owner_address(ownerAddress.data(), ownerAddress.size());
 
-    const auto toAddress = Base58::decodeCheck(transfer.to_address());
+    const auto toAddress = decodeAddress(transfer.to_address());
     internal.set_to_address(toAddress.data(), toAddress.size());
 
     internal.set_amount(transfer.amount());
@@ -462,8 +492,8 @@ protocol::TransferAssetContract to_internal(const Proto::TransferAssetContract& 
 protocol::FreezeBalanceContract to_internal(const Proto::FreezeBalanceContract& freezeContract) {
     auto internal = protocol::FreezeBalanceContract();
     auto resource = protocol::ResourceCode();
-    const auto ownerAddress = Base58::decodeCheck(freezeContract.owner_address());
-    const auto receiverAddress = Base58::decodeCheck(freezeContract.receiver_address());
+    const auto ownerAddress = decodeAddress(freezeContract.owner_address());
+    const auto receiverAddress = decodeAddress(freezeContract.receiver_address());
 
     protocol::ResourceCode_Parse(freezeContract.resource(), &resource);
 
@@ -479,7 +509,7 @@ protocol::FreezeBalanceContract to_internal(const Proto::FreezeBalanceContract& 
 protocol::FreezeBalanceV2Contract to_internal(const Proto::FreezeBalanceV2Contract& freezeContract) {
     auto internal = protocol::FreezeBalanceV2Contract();
     auto resource = protocol::ResourceCode();
-    const auto ownerAddress = Base58::decodeCheck(freezeContract.owner_address());
+    const auto ownerAddress = decodeAddress(freezeContract.owner_address());
 
     protocol::ResourceCode_Parse(freezeContract.resource(), &resource);
 
@@ -493,8 +523,8 @@ protocol::FreezeBalanceV2Contract to_internal(const Proto::FreezeBalanceV2Contra
 protocol::UnfreezeBalanceContract to_internal(const Proto::UnfreezeBalanceContract& unfreezeContract) {
     auto internal = protocol::UnfreezeBalanceContract();
     auto resource = protocol::ResourceCode();
-    const auto ownerAddress = Base58::decodeCheck(unfreezeContract.owner_address());
-    const auto receiverAddress = Base58::decodeCheck(unfreezeContract.receiver_address());
+    const auto ownerAddress = decodeAddress(unfreezeContract.owner_address());
+    const auto receiverAddress = decodeAddress(unfreezeContract.receiver_address());
 
     protocol::ResourceCode_Parse(unfreezeContract.resource(), &resource);
 
@@ -508,7 +538,7 @@ protocol::UnfreezeBalanceContract to_internal(const Proto::UnfreezeBalanceContra
 protocol::UnfreezeBalanceV2Contract to_internal(const Proto::UnfreezeBalanceV2Contract& unfreezeContract) {
     auto internal = protocol::UnfreezeBalanceV2Contract();
     auto resource = protocol::ResourceCode();
-    const auto ownerAddress = Base58::decodeCheck(unfreezeContract.owner_address());
+    const auto ownerAddress = decodeAddress(unfreezeContract.owner_address());
 
     protocol::ResourceCode_Parse(unfreezeContract.resource(), &resource);
 
@@ -522,8 +552,8 @@ protocol::UnfreezeBalanceV2Contract to_internal(const Proto::UnfreezeBalanceV2Co
 protocol::DelegateResourceContract to_internal(const Proto::DelegateResourceContract& delegateContract) {
     auto internal = protocol::DelegateResourceContract();
     auto resource = protocol::ResourceCode();
-    const auto ownerAddress = Base58::decodeCheck(delegateContract.owner_address());
-    const auto receiverAddress = Base58::decodeCheck(delegateContract.receiver_address());
+    const auto ownerAddress = decodeAddress(delegateContract.owner_address());
+    const auto receiverAddress = decodeAddress(delegateContract.receiver_address());
 
     protocol::ResourceCode_Parse(delegateContract.resource(), &resource);
 
@@ -539,8 +569,8 @@ protocol::DelegateResourceContract to_internal(const Proto::DelegateResourceCont
 protocol::UnDelegateResourceContract to_internal(const Proto::UnDelegateResourceContract& undelegateContract) {
     auto internal = protocol::UnDelegateResourceContract();
     auto resource = protocol::ResourceCode();
-    const auto ownerAddress = Base58::decodeCheck(undelegateContract.owner_address());
-    const auto receiverAddress = Base58::decodeCheck(undelegateContract.receiver_address());
+    const auto ownerAddress = decodeAddress(undelegateContract.owner_address());
+    const auto receiverAddress = decodeAddress(undelegateContract.receiver_address());
 
     protocol::ResourceCode_Parse(undelegateContract.resource(), &resource);
 
@@ -554,14 +584,14 @@ protocol::UnDelegateResourceContract to_internal(const Proto::UnDelegateResource
 
 protocol::WithdrawExpireUnfreezeContract to_internal(const Proto::WithdrawExpireUnfreezeContract& withdrawExpireUnfreezeContract) {
     auto internal = protocol::WithdrawExpireUnfreezeContract();
-    const auto ownerAddress = Base58::decodeCheck(withdrawExpireUnfreezeContract.owner_address());
+    const auto ownerAddress = decodeAddress(withdrawExpireUnfreezeContract.owner_address());
     internal.set_owner_address(ownerAddress.data(), ownerAddress.size());
     return internal;
 }
 
 protocol::UnfreezeAssetContract to_internal(const Proto::UnfreezeAssetContract& unfreezeContract) {
     auto internal = protocol::UnfreezeAssetContract();
-    const auto ownerAddress = Base58::decodeCheck(unfreezeContract.owner_address());
+    const auto ownerAddress = decodeAddress(unfreezeContract.owner_address());
 
     internal.set_owner_address(ownerAddress.data(), ownerAddress.size());
 
@@ -570,13 +600,13 @@ protocol::UnfreezeAssetContract to_internal(const Proto::UnfreezeAssetContract& 
 
 protocol::VoteAssetContract to_internal(const Proto::VoteAssetContract& voteContract) {
     auto internal = protocol::VoteAssetContract();
-    const auto ownerAddress = Base58::decodeCheck(voteContract.owner_address());
+    const auto ownerAddress = decodeAddress(voteContract.owner_address());
 
     internal.set_owner_address(ownerAddress.data(), ownerAddress.size());
     internal.set_support(voteContract.support());
     internal.set_count(voteContract.count());
     for (int i = 0; i < voteContract.vote_address_size(); i++) {
-        auto voteAddress = Base58::decodeCheck(voteContract.vote_address(i));
+        auto voteAddress = decodeAddress(voteContract.vote_address(i));
         internal.add_vote_address(voteAddress.data(), voteAddress.size());
     }
 
@@ -585,12 +615,12 @@ protocol::VoteAssetContract to_internal(const Proto::VoteAssetContract& voteCont
 
 protocol::VoteWitnessContract to_internal(const Proto::VoteWitnessContract& voteContract) {
     auto internal = protocol::VoteWitnessContract();
-    const auto ownerAddress = Base58::decodeCheck(voteContract.owner_address());
+    const auto ownerAddress = decodeAddress(voteContract.owner_address());
 
     internal.set_owner_address(ownerAddress.data(), ownerAddress.size());
     internal.set_support(voteContract.support());
     for (int i = 0; i < voteContract.votes_size(); i++) {
-        auto voteAddress = Base58::decodeCheck(voteContract.votes(i).vote_address());
+        auto voteAddress = decodeAddress(voteContract.votes(i).vote_address());
         auto* vote = internal.add_votes();
 
         vote->set_vote_address(voteAddress.data(), voteAddress.size());
@@ -602,7 +632,7 @@ protocol::VoteWitnessContract to_internal(const Proto::VoteWitnessContract& vote
 
 protocol::WithdrawBalanceContract to_internal(const Proto::WithdrawBalanceContract& withdrawContract) {
     auto internal = protocol::WithdrawBalanceContract();
-    const auto ownerAddress = Base58::decodeCheck(withdrawContract.owner_address());
+    const auto ownerAddress = decodeAddress(withdrawContract.owner_address());
 
     internal.set_owner_address(ownerAddress.data(), ownerAddress.size());
 
@@ -611,8 +641,8 @@ protocol::WithdrawBalanceContract to_internal(const Proto::WithdrawBalanceContra
 
 protocol::TriggerSmartContract to_internal(const Proto::TriggerSmartContract& triggerSmartContract) {
     auto internal = protocol::TriggerSmartContract();
-    const auto ownerAddress = Base58::decodeCheck(triggerSmartContract.owner_address());
-    const auto contractAddress = Base58::decodeCheck(triggerSmartContract.contract_address());
+    const auto ownerAddress = decodeAddress(triggerSmartContract.owner_address());
+    const auto contractAddress = decodeAddress(triggerSmartContract.contract_address());
 
     internal.set_owner_address(ownerAddress.data(), ownerAddress.size());
     internal.set_contract_address(contractAddress.data(), contractAddress.size());
@@ -625,7 +655,7 @@ protocol::TriggerSmartContract to_internal(const Proto::TriggerSmartContract& tr
 }
 
 protocol::TriggerSmartContract to_internal(const Proto::TransferTRC20Contract& transferTrc20Contract) {
-    auto toAddress = Base58::decodeCheck(transferTrc20Contract.to_address());
+    auto toAddress = decodeAddress(transferTrc20Contract.to_address());
     // amount is 256 bits, big endian
     Data amount = data(transferTrc20Contract.amount());
 
@@ -680,7 +710,7 @@ void setBlockReference(const Proto::Transaction& transaction, protocol::Transact
     internal.mutable_raw_data()->set_ref_block_bytes(heightData.data() + heightData.size() - 2, 2);
 }
 
-protocol::Transaction buildTransaction(const Proto::SigningInput& input) noexcept {
+protocol::Transaction buildTransaction(const Proto::SigningInput& input) {
     auto tx = protocol::Transaction();
 
     if (input.transaction().has_transfer()) {
@@ -830,7 +860,7 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
         }
     } else if (!input.raw_json().empty()) {
         try {
-            auto parsed = json::parse(input.raw_json());
+            auto parsed = parseRawJson(input.raw_json());
             auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
             if (!ensureTransactionHashes(txObj, errorMessage)) {
@@ -854,7 +884,7 @@ Proto::SigningOutput signDirect(const Proto::SigningInput& input) {
     // preserving the original wrapper structure (e.g. {"transaction": {...}})
     if (!input.raw_json().empty()) {
         try {
-            auto parsed = json::parse(input.raw_json());
+            auto parsed = parseRawJson(input.raw_json());
             auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
             if (ensureTransactionHashes(txObj, errorMessage)) {
@@ -877,7 +907,14 @@ Proto::SigningOutput Signer::sign(const Proto::SigningInput& input) {
     }
 
     auto output = Proto::SigningOutput();
-    auto tx = buildTransaction(input);
+    protocol::Transaction tx;
+    try {
+        tx = buildTransaction(input);
+    } catch (const std::invalid_argument& error) {
+        output.set_error(Common::Proto::Error_invalid_address);
+        output.set_error_message(error.what());
+        return output;
+    }
 
     // Get default timestamp and expiration
     const uint64_t now = duration_cast<std::chrono::milliseconds>(
@@ -914,7 +951,7 @@ Proto::SigningOutput Signer::compile(const Data& signature) const {
     Proto::SigningOutput output;
     if (!input.raw_json().empty()) {
         try {
-            auto parsed = json::parse(input.raw_json());
+            auto parsed = parseRawJson(input.raw_json());
             auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
             if (!ensureTransactionHashes(txObj, errorMessage)) {
@@ -934,22 +971,27 @@ Proto::SigningOutput Signer::compile(const Data& signature) const {
             return output;
         }
     }
-    auto preImage = signaturePreimage();
-    auto hash = Hash::sha256(preImage);
-    auto transaction = buildTransaction(input);
-    const auto json = transactionJSON(transaction, hash, signature).dump();
-    output.set_json(json.data(), json.size());
-    output.set_ref_block_bytes(transaction.raw_data().ref_block_bytes());
-    output.set_ref_block_hash(transaction.raw_data().ref_block_hash());
-    output.set_id(hash.data(), hash.size());
-    output.set_signature(signature.data(), signature.size());
+    try {
+        auto preImage = signaturePreimage();
+        auto hash = Hash::sha256(preImage);
+        auto transaction = buildTransaction(input);
+        const auto json = transactionJSON(transaction, hash, signature).dump();
+        output.set_json(json.data(), json.size());
+        output.set_ref_block_bytes(transaction.raw_data().ref_block_bytes());
+        output.set_ref_block_hash(transaction.raw_data().ref_block_hash());
+        output.set_id(hash.data(), hash.size());
+        output.set_signature(signature.data(), signature.size());
+    } catch (const std::invalid_argument& error) {
+        output.set_error(Common::Proto::Error_invalid_address);
+        output.set_error_message(error.what());
+    }
     return output;
 }
 
 Data Signer::signaturePreimage() const {
     if (!input.raw_json().empty()) {
         try {
-            auto parsed = json::parse(input.raw_json());
+            auto parsed = parseRawJson(input.raw_json());
             auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
             if (ensureTransactionHashes(txObj, errorMessage) &&
@@ -961,13 +1003,17 @@ Data Signer::signaturePreimage() const {
             return {};
         }
     }
-    return serialize(buildTransaction(input));
+    try {
+        return serialize(buildTransaction(input));
+    } catch (const std::invalid_argument&) {
+        return {};
+    }
 }
 
 Data Signer::signaturePreimageHash() const {
     if (!input.raw_json().empty()) {
         try {
-            auto parsed = json::parse(input.raw_json());
+            auto parsed = parseRawJson(input.raw_json());
             auto& txObj = findTransactionObject(parsed);
             std::string errorMessage;
             if (ensureTransactionHashes(txObj, errorMessage) &&
@@ -980,6 +1026,9 @@ Data Signer::signaturePreimageHash() const {
         }
     }
     auto preImage = signaturePreimage();
+    if (preImage.empty()) {
+        return {};
+    }
     return Hash::sha256(preImage);
 }
 

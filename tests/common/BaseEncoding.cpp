@@ -66,4 +66,11 @@ TEST(Base32, DecodeInvalid) {
     ASSERT_FALSE(decode("ABC", decoded)); // invalid odd length
 }
 
+TEST(Base32, DecodeNullEmbedded) {
+    Data decoded;
+    auto withNul = std::string("AE") + '\0' + "JUNK";
+    ASSERT_FALSE(decode(withNul, decoded));
+    ASSERT_TRUE(decoded.empty());
+}
+
 } // namespace TW::Base32::tests

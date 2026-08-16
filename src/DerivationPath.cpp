@@ -4,10 +4,13 @@
 
 #include "DerivationPath.h"
 
-#include <cstdio>
+#include <charconv>
 #include <stdexcept>
 
 using namespace TW;
+
+// (#4802): indices >= this offset collide with the hardened bit and must be rejected.
+static constexpr uint64_t HardenedOffset = 0x80000000;
 
 DerivationPath::DerivationPath(const std::string& string) {
     const auto* it = string.data();
@@ -21,19 +24,23 @@ DerivationPath::DerivationPath(const std::string& string) {
     }
 
     while (it != end) {
-        uint32_t value;
-        if (std::sscanf(it, "%ud", &value) != 1) {
+        // (#4802): parse with std::from_chars and reject out-of-range indices so a
+        // component >= HardenedOffset can't silently collide with the hardened bit.
+        uint64_t value{0};
+        auto [ptr, ec] = std::from_chars(it, end, value);
+        if (ec == std::errc::invalid_argument) {
             throw std::invalid_argument("Invalid component");
         }
-        while (it != end && isdigit(*it)) {
-            ++it;
+        if (ec == std::errc::result_out_of_range || value >= HardenedOffset) {
+            throw std::invalid_argument("Derivation index out of range");
         }
+        it = ptr;
 
         auto hardened = (it != end && *it == '\'');
         if (hardened) {
             ++it;
         }
-        indices.emplace_back(value, hardened);
+        indices.emplace_back(static_cast<uint32_t>(value), hardened);
 
         if (it == end) {
             break;

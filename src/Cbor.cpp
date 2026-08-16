@@ -8,6 +8,7 @@
 
 #include <sstream>
 #include <cassert>
+#include <limits>
 
 namespace TW::Cbor {
 
@@ -232,7 +233,14 @@ uint32_t Decode::getTotalLen() const {
             return typeDesc.byteCount;
         case MT_bytes:
         case MT_string:
-            return (uint32_t)typeDesc.byteCount + (uint32_t)typeDesc.value;
+            {
+                // (#4707): attacker-controlled length can overflow uint32_t,
+                // defeating the subsequent bounds checks. Reject before the cast.
+                if (typeDesc.value > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) - typeDesc.byteCount) {
+                    throw std::invalid_argument("CBOR bytes/string length overflow");
+                }
+                return typeDesc.byteCount + static_cast<uint32_t>(typeDesc.value);
+            }
         case MT_array:
             return getCompoundLength(1);
         case MT_map:
@@ -269,10 +277,15 @@ Data Decode::getBytes() const {
     if (typeDesc.majorType != MT_bytes && typeDesc.majorType != MT_string) {
         throw std::invalid_argument("CBOR data type not bytes/string");
     }
-    auto len = (uint32_t)typeDesc.value;
-    if (length() < (uint32_t)typeDesc.byteCount + (uint32_t)len) {
+    // (#4707): reject lengths that overflow uint32_t before the bounds check.
+    if (typeDesc.value > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) - typeDesc.byteCount) {
+        throw std::invalid_argument("CBOR bytes/string length overflow");
+    }
+    uint32_t requiredLen = typeDesc.byteCount + static_cast<uint32_t>(typeDesc.value);
+    if (length() < requiredLen) {
         throw std::invalid_argument("CBOR bytes/string data too short");
     }
+    auto len = (uint32_t)typeDesc.value;
     assert(subStart + typeDesc.byteCount + len <= data->origData.size());
     return TW::data(data->origData.data() + (subStart + typeDesc.byteCount), len); 
 }
@@ -297,6 +310,9 @@ uint32_t Decode::getCompoundLength(uint32_t countMultiplier) const {
             break;
         }
         uint32_t elemLen = nextElem.getTotalLen();
+        if (elemLen == 0 || checkAddUnsignedOverflow(len, elemLen)) {
+            throw std::invalid_argument("CBOR invalid element length");
+        }
         if (len + elemLen > length()) {
             throw std::invalid_argument("CBOR array data too short");
         }
@@ -373,7 +389,11 @@ bool Decode::isValid() const {
             case MT_bytes:
             case MT_string:
                 {
-                    auto len = (uint32_t)(typeDesc.byteCount + typeDesc.value);
+                    // (#4707): reject overflowing lengths instead of wrapping.
+                    if (typeDesc.value > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) - typeDesc.byteCount) {
+                        return false;
+                    }
+                    uint32_t len = typeDesc.byteCount + static_cast<uint32_t>(typeDesc.value);
                     return (len <= subLen);
                 }
 
